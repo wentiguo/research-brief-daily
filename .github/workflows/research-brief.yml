@@ -1,0 +1,168 @@
+﻿name: Research Brief
+
+on:
+  schedule:
+    # The user wants the brief in the mailbox at 08:00 Asia/Shanghai, every day.
+    # GitHub cron has no timezone field and always interprets UTC: 08:00 CST = 00:00 UTC,
+    # and China has kept UTC+8 all year, so `0 0 * * *` is the 08:00 delivery slot.
+    # GitHub only promises "within a few minutes of the hour", and a second scheduler
+    # (local 08:00 automation) may hit the same day, so the job itself is idempotent:
+    # see automation/mail_ledger.json.
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: "Search window in days (daily run pushes only the current day)"
+        required: false
+        default: "1"
+      send_email:
+        description: "Send email"
+        required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      import_zotero:
+        description: "Import selected papers to Zotero"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      force_send:
+        description: "Re-send today's mail even though the ledger already recorded it"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: write
+
+# The scheduled run and the hand-triggered one must never mail the same day twice.
+# Queueing, not cancelling, keeps the second attempt after the first one has committed
+# its mail ledger, so the ledger check sees the mail that was already delivered.
+concurrency:
+  group: research-brief-daily
+  cancel-in-progress: false
+
+jobs:
+  generate-brief:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Xiaohongshu package dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pillow python-docx
+
+      - name: Install CJK fonts for digest images
+        # The poster and long image are rendered with Pillow; without a CJK font the
+        # renderer skips both and the email would silently lose them.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra || sudo apt-get install -y fonts-wqy-zenhei
+
+      - name: Generate research brief
+        env:
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          RESEARCH_BRIEF_FROM_EMAIL: ${{ secrets.RESEARCH_BRIEF_FROM_EMAIL }}
+          RESEARCH_BRIEF_TO_EMAIL: ${{ secrets.RESEARCH_BRIEF_TO_EMAIL }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM_EMAIL: ${{ secrets.SMTP_FROM_EMAIL }}
+          SMTP_TO_EMAIL: ${{ secrets.SMTP_TO_EMAIL }}
+          SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
+          SMTP_STARTTLS: ${{ secrets.SMTP_STARTTLS }}
+          SMTP_RETRIES: ${{ secrets.SMTP_RETRIES }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
+          IEEE_XPLORE_API_KEY: ${{ secrets.IEEE_XPLORE_API_KEY }}
+          ZOTERO_API_KEY: ${{ secrets.ZOTERO_API_KEY }}
+          ZOTERO_USER_ID: ${{ secrets.ZOTERO_USER_ID }}
+          ZOTERO_GROUP_ID: ${{ secrets.ZOTERO_GROUP_ID }}
+          ZOTERO_COLLECTION_KEY: ${{ secrets.ZOTERO_COLLECTION_KEY }}
+          DAYS_BACK: ${{ github.event.inputs.days_back || '1' }}
+          SEND_EMAIL: ${{ github.event.inputs.send_email || 'true' }}
+          IMPORT_ZOTERO: ${{ github.event.inputs.import_zotero || 'false' }}
+          FORCE_SEND: ${{ github.event.inputs.force_send || 'false' }}
+        run: |
+          EMAIL_FLAG=""
+          if [ "${SEND_EMAIL}" = "false" ]; then
+            EMAIL_FLAG="--no-email"
+          fi
+          ZOTERO_FLAG=""
+          if [ "${IMPORT_ZOTERO}" = "true" ]; then
+            ZOTERO_FLAG="--zotero"
+          fi
+          # The ledger exists so a second scheduler on the same day cannot mail twice.
+          # When a run is deliberately redone - a fix landed after the mail already went,
+          # say so - that guarantee is the thing being overridden, and it has to be asked
+          # for by hand rather than inferred from an environment difference.
+          FORCE_FLAG=""
+          if [ "${FORCE_SEND}" = "true" ]; then
+            FORCE_FLAG="--force-send"
+          fi
+          python scripts/generate_research_brief.py --days-back "${DAYS_BACK}" ${EMAIL_FLAG} ${ZOTERO_FLAG} ${FORCE_FLAG}
+
+      - name: Upload digest images and paper attachments
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-images-${{ github.event.inputs.days_back || 'daily' }}
+          path: |
+            research_briefs/images
+            research_briefs/attachments
+            research_briefs/latest.md
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Commit recommendation history, mail ledger and weekly archive
+        if: ${{ github.event.inputs.send_email != 'false' }}
+        run: |
+          # automation/mail_ledger.json has to travel with the code: it is the record the
+          # next run reads to decide whether today's mail already went out.
+          CHANGED=0
+          for path in automation/recommended_history.json reference_push_archive automation/mail_ledger.json; do
+            if ! git diff --quiet -- "$path"; then CHANGED=1; fi
+          done
+          if [ "$CHANGED" = "0" ]; then
+            echo "No recommendation history, mail ledger or archive changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add automation/recommended_history.json reference_push_archive automation/mail_ledger.json
+          git commit -m "Update recommended paper history, mail ledger and archive"
+          # A bare `git push` fails the whole job whenever anything else lands on
+          # main while this run is in flight - a hand edit of the config in the web
+          # UI, or a file pushed from a local machine. The run has already mailed
+          # by this point, so a rejected push loses the ledger that stops the next
+          # run from re-sending the same day, and marks a successful mail as a
+          # failed build. Rebase onto the remote tip instead, and if the ledger
+          # itself conflicts, keep the remote copy and say so rather than forcing
+          # it: the mail is already sent, so a clobbered history is recoverable
+          # and a silently broken run is not.
+          # The local PDF-fetch bridge writes the poster PDFs + manifest into the
+          # working tree as untracked files (so the mail can attach them). By now the
+          # mail is already sent, and origin/main carries those same paths as tracked
+          # files (the local machine pushed them), so a plain rebase checkout would
+          # abort on the untracked-vs-tracked clash. Drop the generated artifacts
+          # first; they are not part of the committed ledger and are safe to remove.
+          git clean -fd research_briefs/attachments 2>/dev/null || true
+          git pull --rebase --autostash origin main
+          git push origin HEAD:main

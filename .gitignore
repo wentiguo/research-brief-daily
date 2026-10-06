@@ -1,0 +1,39 @@
+﻿__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.DS_Store
+.vscode/
+.idea/
+
+# Local helper scripts ARE tracked: local_fetch_posters.py (the cloud->local PDF
+# bridge) and push_contents.py are part of how the project works, and every path in
+# them resolves through .tools/repo_config.py rather than a hard-coded location.
+
+# Personal, machine-specific, or generated. Never commit these.
+
+# --- your own settings, written by scripts/configure_project.py ---
+automation/research_brief_config.json
+automation/local_env.json
+
+# --- run state: the dedup ledger and the delivery history ---
+automation/mail_ledger.json
+automation/recommended_history.json
+
+# --- subscriber session artefacts: cookies and a full browser profile ---
+.browser_profile/
+.browser_storage_state.json
+.browser_cdp.json
+
+# --- generated output ---
+research_briefs/*.md
+research_briefs/*.bib
+research_briefs/*.html
+research_briefs/attachments/
+research_briefs/local_pdfs/
+!research_briefs/.gitkeep
+xhs_materials/
+reference_push_archive/
+automation/.feed_cache/
+tests/_tmp_*/

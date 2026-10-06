@@ -57,7 +57,7 @@ def chat_text(system: str, user: str, *, max_tokens: int = 900, temperature: flo
         return ""
 
 
-def paper_digest(paper: dict, *, style: str = "brief") -> str:
+def paper_digest(paper: dict) -> str:
     title = paper.get("title", "")
     venue = paper.get("venue", "")
     abstract = paper.get("abstract", "")
@@ -73,8 +73,6 @@ def paper_digest(paper: dict, *, style: str = "brief") -> str:
 3. 输出 2-3 句话，突出研究问题、可能贡献、为什么值得看。
 4. 如果信息不足，明确说“摘要信息不足”。
 """
-    if style == "xhs":
-        prompt += "\n5. 语气适合小红书科研图文：清楚、有吸引力，但不要夸大。"
     return chat_text(
         "你是凝聚态物理、材料科学和科研写作助手，擅长严谨地把论文摘要改写成中文科研简报。",
         prompt,
@@ -113,38 +111,6 @@ def innovation_summary(paper: dict) -> str:
         prompt,
         max_tokens=1100,
         temperature=0.3,
-    )
-
-
-def xhs_post_for_paper(paper: dict) -> str:
-    scores = paper.get("scores", {})
-    prompt = f"""请把下面论文写成可发布于小红书的中文科研图文文案。
-
-标题：{paper.get('title', '')}
-期刊/来源：{paper.get('venue', '')}
-综合评分：{scores.get('overall', '')}/100
-相关度：{scores.get('relevance', '')}
-期刊水平：{scores.get('journal_level', '')}
-写作质量：{scores.get('writing_quality', '')}
-摘要：{paper.get('abstract', '')}
-
-输出格式：
-标题备选：
-1.
-2.
-3.
-
-正文：
-用 4-6 个短段落，适合小红书科研读者。不要编造实验结果。
-
-标签：
-给出 8-12 个话题标签。
-"""
-    return chat_text(
-        "你是严谨的科研新媒体编辑，面向材料科学/凝聚态物理研究生和科研工作者写小红书图文。",
-        prompt,
-        max_tokens=1100,
-        temperature=0.55,
     )
 
 

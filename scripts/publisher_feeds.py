@@ -151,23 +151,31 @@ def extract_abstract(raw_markup: str) -> str:
 
 
 def normalize_date(value: str) -> str:
-    """Best-effort ISO (YYYY-MM-DD) normalization for feed date strings."""
+    """Best-effort ISO (YYYY-MM-DD) normalization for feed date strings.
+
+    Always returns zero-padded components so the value can be both string-compared
+    (the feed-level window) and date-parsed (the main-level window) unambiguously.
+    A bare "2026-10-6" from a Crossref date-parts join, or a "2026-10" month-only
+    value, is normalized to "2026-10-06" / "2026-10-01". Previously a half-padded
+    "2026-10-6" slipped through and was read by parsed_publication_date() as October
+    1st (the day group failed to match two digits), which dropped the paper as stale.
+    """
     text = _clean_text(value)
     if not text:
         return ""
-    iso = re.match(r"(\d{4})-(\d{2})-(\d{2})", text)
+    iso = re.match(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
     if iso:
-        return f"{iso.group(1)}-{iso.group(2)}-{iso.group(3)}"
+        return f"{int(iso.group(1)):04d}-{int(iso.group(2)):02d}-{int(iso.group(3)):02d}"
     rfc = re.search(r"(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})", text)
     if rfc:
         months = {m: i for i, m in enumerate(
             ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
         month = months.get(rfc.group(2)[:3].lower())
         if month:
-            return f"{rfc.group(3)}-{month:02d}-{int(rfc.group(1)):02d}"
-    loose = re.search(r"(\d{4})-(\d{2})", text)
+            return f"{int(rfc.group(3)):04d}-{month:02d}-{int(rfc.group(1)):02d}"
+    loose = re.search(r"(\d{4})-(\d{1,2})", text)
     if loose:
-        return f"{loose.group(1)}-{loose.group(2)}-01"
+        return f"{int(loose.group(1)):04d}-{int(loose.group(2)):02d}-01"
     return text[:10]
 
 
@@ -749,8 +757,19 @@ def fetch_crossref_journal_feeds(
             pieces = pub.get("date-parts") or [[]]
             published = ""
             if pieces and pieces[0]:
-                parts = [str(x) for x in pieces[0] if x not in (None, "")]
-                published = "-".join(parts) if parts else ""
+                # Crossref returns date-parts as raw integers (e.g. [2026, 10, 6]); joining
+                # them with "-" yields "2026-10-6" (single-digit day), which
+                # parsed_publication_date() later reads as October 1st and drops as stale.
+                # Zero-pad every component so the value is an unambiguous ISO date.
+                try:
+                    nums = [int(x) for x in pieces[0] if x not in (None, "")]
+                except (TypeError, ValueError):
+                    nums = []
+                if nums:
+                    year = nums[0]
+                    month = nums[1] if len(nums) > 1 else 1
+                    day = nums[2] if len(nums) > 2 else 1
+                    published = f"{year:04d}-{month:02d}-{day:02d}"
             if published and published < cutoff[:10]:
                 continue
             container = " ".join(item.get("container-title") or [])
@@ -923,7 +942,16 @@ def fetch_publisher_feeds(
         return []
 
     import datetime as dt
-    cutoff = (dt.datetime.now(dt.UTC).date() - dt.timedelta(days=days_back)).isoformat()
+    # Feed-level window: keep a paper whose `published` date falls within
+    # (days_back + tolerance) days. The tolerance compensates for publisher feeds
+    # that lag the real publication date by a day or two (observed for PRB and for
+    # Crossref journal records), so genuinely recent papers are not pruned before
+    # the precise date gate in filter_recent_publications() ever evaluates them.
+    try:
+        tolerance = int(config.get("published_window_tolerance_days", 1) or 1)
+    except (TypeError, ValueError):
+        tolerance = 1
+    cutoff = (dt.datetime.now(dt.UTC).date() - dt.timedelta(days=days_back + tolerance)).isoformat()
     user_agent = f"{APP_NAME} (mailto:{contact})"
 
     papers: list[dict[str, Any]] = []

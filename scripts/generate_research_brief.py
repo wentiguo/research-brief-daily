@@ -904,7 +904,11 @@ def published_rank(paper: dict[str, Any]) -> int:
 
 def parsed_publication_date(paper: dict[str, Any]) -> dt.date | None:
     published = normalize_text(paper.get("published"))
-    match = re.match(r"(\d{4})(?:-(\d{2}))?(?:-(\d{2}))?", published)
+    # Allow 1- or 2-digit month/day: a Crossref date-parts join can produce
+    # "2026-10-6", and requiring two digits there made the day default to 1
+    # (October 1st), dropping the paper as stale. Normalization now zero-pads,
+    # but the parser stays lenient as a second line of defence.
+    match = re.match(r"(\d{4})(?:-(\d{1,2}))?(?:-(\d{1,2}))?", published)
     if not match:
         return None
     year = int(match.group(1))
@@ -918,7 +922,14 @@ def parsed_publication_date(paper: dict[str, Any]) -> dt.date | None:
 
 def filter_recent_publications(papers: list[dict[str, Any]], days_back: int, config: dict[str, Any], run_date: dt.date) -> list[dict[str, Any]]:
     max_age = int(config.get("published_max_age_days", days_back))
-    cutoff = run_date - dt.timedelta(days=max_age)
+    try:
+        tolerance = int(config.get("published_window_tolerance_days", 1) or 1)
+    except (TypeError, ValueError):
+        tolerance = 1
+    # `tolerance` widens the lower bound by a few days to absorb publisher-feed
+    # publication-date lag (a paper dated 1-2 days before the run is still "fresh").
+    # It must mirror the tolerance applied at the feed level so the two windows agree.
+    cutoff = run_date - dt.timedelta(days=max_age + tolerance)
     fresh: list[dict[str, Any]] = []
     for paper in papers:
         pub_date = parsed_publication_date(paper)
@@ -3078,7 +3089,13 @@ def main() -> int:
     else:
         print("archive/weekly step skipped (dry run)")
 
-    if not args.dry_run and not args.no_email:
+    if not ranked:
+        # Genuinely empty day: no paper survived the domain / score / venue gates, so
+        # there is nothing to report. Do NOT send a placeholder mail (it would teach the
+        # reader to ignore the brief), and do NOT record a send in the ledger, so a later
+        # re-run or an explicit force-send can still deliver a real brief for today.
+        print("no candidate papers passed the selection gates today; email skipped (empty day)")
+    elif not args.dry_run and not args.no_email:
         # `markdown` already carries the attachment section - it was appended before the
         # pictures were drawn, so the long image and the mail show the same body.
         paper_files = [path for _label, path in article_files]

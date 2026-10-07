@@ -86,6 +86,7 @@
   "extra_papers_per_direction": 3,
   "excellent_score_threshold": 9.0,
   "published_max_age_days": 1,
+  "published_window_tolerance_days": 1,
   "digest_images": {
     "enabled": true,
     "poster_papers": 2,

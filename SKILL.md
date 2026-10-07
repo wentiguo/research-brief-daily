@@ -211,6 +211,29 @@ the anchors so it cannot cancel the `photonic crystal` signal. Set
 Multi-word terms are quoted, and a bare `search` is avoided because it reaches into
 reference lists and returns papers that merely *cite* the topic.
 
+## Dependency discipline
+
+**The core pipeline is standard library only** — `generate_research_brief.py`,
+`publisher_feeds.py`, `fetch_paper_attachments.py`, `deepseek_client.py`. Four
+third-party packages exist, all in optional channels: `pillow` (digest and poster
+images), `numpy` + `playwright` (desktop-browser pass), `pyautogui` (cursor control).
+
+Two consequences worth keeping:
+
+* A new `pip install` in the core path is a design change. It makes the project
+  unrunnable on a bare interpreter, which is the property that lets a new user clone
+  and dry-run with nothing but Python. Put the dependency in
+  `requirements-optional.txt` and gate the feature behind a config flag instead.
+* Run `python .tools/_check_core_imports.py` before pushing. It blocks the four
+  packages via a `sys.meta_path` finder and then imports the core modules and runs a
+  dry run, so a stray import fails loudly rather than working on whichever machine
+  happens to have the package installed.
+
+Note that blocking via `sys.path` stripping is wrong: CPython's C extension modules
+(`_socket`, and the `Lib` directory generally) are part of the standard library but live
+beside the DLL directory, so removing site-packages by path breaks `import smtplib` for
+reasons unrelated to third-party packages. Block by module name, not by path.
+
 ## Journal tiers
 
 `journal_tier` resolves **exact names across both tiers first, prefix matches second**.

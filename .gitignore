@@ -27,11 +27,12 @@ automation/recommended_history.json
 .browser_cdp.json
 
 # --- generated output ---
-research_briefs/*.md
-research_briefs/*.bib
-research_briefs/*.html
-research_briefs/attachments/
-research_briefs/local_pdfs/
+# Everything under research_briefs/ is generated, EXCEPT the placeholder. Written as
+# "everything except .gitkeep" rather than as per-extension rules, because the run
+# emits .md/.bib/.html/.json/.txt/PDF and a per-extension list always misses one --
+# notably latest_poster_wishlist.json, which carries the two poster DOIs of the day
+# and is part of the cloud->local bridge protocol, not a file anyone wants published.
+research_briefs/*
 !research_briefs/.gitkeep
 xhs_materials/
 reference_push_archive/

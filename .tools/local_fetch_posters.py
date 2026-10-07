@@ -13,8 +13,8 @@ Contents API, so it is NOT a git checkout. We therefore read the wishlist and wr
 the PDFs back through the Contents API (same path push_contents.py uses - handles PDFs
 up to ~90 MB per file without trouble).
 
-Run by the daily local automation (see the recurring WorkBuddy automation). Safe to run
-by hand too.
+Run this right after the daily workflow finishes, or schedule it on your own machine.
+Safe to run by hand too.
 """
 
 from __future__ import annotations

@@ -1,0 +1,27 @@
+# Optional dependencies.
+#
+# None of these are needed for the daily brief, the metadata search, the topic
+# gate, or the email. Install only the channel you actually use.
+
+# --- digest images and the long poster image (scripts/render_digest_images.py) ---
+# Also used by scripts/fetch_browser_paper.py for the pixel matcher.
+pillow>=10.0
+# A CJK font is required for the Chinese poster text; the renderer skips the image
+# entirely without one. On Debian/Ubuntu: fonts-noto-cjk (the workflow installs it).
+
+# --- desktop-browser pass for bot-walled publishers (scripts/fetch_browser_paper.py) ---
+# The script ATTACHES to an already-running desktop Chrome over the DevTools
+# protocol rather than launching an automated one, because a browser it merely
+# attaches to reports no automation flag -- which is what makes the publisher's
+# bot wall go away. It therefore needs the Chrome DevTools Protocol package, and a
+# human to solve the click challenge if one appears.
+numpy>=1.24
+playwright>=1.40          # for the CDP connection, not for launching a browser
+# Plus a local Chrome/Chromium install, and playwright's own browser download only
+# if you want it to drive its own instead of attaching.
+
+# --- physical cursor control, only if a challenge needs a real press ---
+# scripts/mouse_operator.py moves the OS cursor and presses it. Desktop-only, and
+# it is the one component that touches your input devices: read it before running
+# it, and do not run it unattended.
+pyautogui>=0.9.54

@@ -25,6 +25,7 @@ Your answers land in `automation/research_brief_config.json`, which is gitignore
 - [Attaching the real PDFs](#attaching-the-real-pdfs-the-cloud--local-bridge)
 - [Configuration reference](#configuration-reference)
 - [Secrets](#secrets)
+- [Dependencies](#dependencies)
 - [Daily operations](#daily-operations)
 - [Architecture](#architecture)
 - [Troubleshooting](#troubleshooting)
@@ -320,6 +321,8 @@ scripts/render_digest_images.py         the long image / poster cards
 scripts/configure_project.py            the interactive setup wizard
 scripts/setup_github_secrets.ps1        PowerShell secret setup
 .tools/repo_config.py                   portable repo + gh discovery (no hard-coded paths)
+.tools/privacy_audit.py                 scans the tree for personal data before publishing
+.tools/_check_core_imports.py           proves the core needs no third-party packages
 .tools/local_fetch_posters.py           cloud -> local PDF bridge
 .tools/push_contents.py                 Contents-API push for a non-git checkout
 tests/                                  167 tests
@@ -340,6 +343,50 @@ tests/                                  167 tests
 | Poster PDFs missing from the mail | the publisher blocked the runner — run `.tools/local_fetch_posters.py` locally |
 | `gh: command not found` | install GitHub CLI; the helpers also try the standard install path and `automation/local_env.json` |
 | A paper keeps reappearing | `recommended_history.json` was not committed back; re-push it |
+
+---
+
+## Dependencies
+
+**The core pipeline uses the Python standard library only.** No `pip install` is needed
+to fetch metadata, run the topic gate, rank papers, render Markdown/BibTeX, or send the
+email. Python 3.11+ is enough.
+
+Four third-party packages exist, all confined to optional channels:
+
+| Package | Needed for | Required? |
+|---|---|---|
+| `pillow` | the long digest image and the poster image | no — the brief degrades to text and says so |
+| `numpy`, `playwright` | the desktop-browser pass for bot-walled publishers | no — only if you enable that pass |
+| `pyautogui` | physical cursor control, if a challenge needs a real press | no — **this one moves your mouse** |
+
+```bash
+pip install -r requirements.txt          # no-op: the core needs nothing
+pip install -r requirements-optional.txt # only if you want the channels above
+```
+
+`requirements-optional.txt` documents each one and what it actually does. Note that
+`scripts/mouse_operator.py` moves the OS cursor and presses it — read it before running,
+and don't run it unattended.
+
+The Chinese poster text also needs a CJK font. On Debian/Ubuntu:
+
+```bash
+sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
+```
+
+The renderer **skips the image and warns** when no CJK font is present, rather than
+emitting boxes.
+
+You can verify the no-dependency claim yourself:
+
+```bash
+python .tools/_check_core_imports.py
+```
+
+It blocks the four packages, then imports the core modules and runs a dry run. It is how
+this claim is kept honest — a new `import` that reaches for a third-party package fails
+that check instead of quietly working on one contributor's machine.
 
 ---
 

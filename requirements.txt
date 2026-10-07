@@ -1,0 +1,10 @@
+# Research Brief Actions -- core dependencies
+#
+# The daily pipeline (scripts/generate_research_brief.py, publisher_feeds.py,
+# fetch_paper_attachments.py, deepseek_client.py) runs on the Python standard
+# library alone. This file is therefore intentionally empty of runtime
+# requirements: `pip install -r requirements.txt` is a no-op and you do not need
+# it to run a brief or the test suite.
+#
+# Optional channels and the digest-image renderer have their own dependencies --
+# see requirements-optional.txt. Nothing in the core path needs them.

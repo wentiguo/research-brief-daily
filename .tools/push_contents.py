@@ -64,6 +64,7 @@ FILES = [
     "tests/test_brief_content_quality.py",  # brief content/briefing-quality regression
     "tests/test_manifest_carryover.py",  # manifest hand-over across runs
     "tests/test_poster_priority_and_bridge.py",  # poster priority + cloud/local date guard
+    "tests/test_local_bridge_guard_20261009.py",  # local bridge only acts on today/yesterday's wishlist
     "automation/research_brief_config.json",
     ".github/workflows/research-brief.yml",
     "SKILL.md",

@@ -135,6 +135,26 @@ def aps_pdf_url(doi: str, journal: str) -> str | None:
     return None
 
 
+def _derive_oa_pdf_url(doi: str, landing: str) -> str:
+    """Synthesize a direct PDF URL when Unpaywall flags OA but omits ``url_for_pdf``.
+
+    Nature/Springer OA articles resolve to a predictable ``/articles/<id>.pdf`` URL;
+    many other OA publishers serve a PDF when ``.pdf`` is appended to the landing
+    page. The caller still verifies the bytes, so a wrong derivation is rejected
+    safely rather than shipping the wrong paper.
+    """
+    if not doi:
+        return ""
+    # Nature / Springer: 10.1038/<manuscript-id> -> nature.com/articles/<manuscript-id>.pdf
+    m = re.search(r"10\.1038/([^\s/]+)", doi)
+    if m:
+        return f"https://www.nature.com/articles/{m.group(1)}.pdf"
+    # Generic fallback: append .pdf to the landing page path.
+    if landing and not landing.lower().endswith(".pdf"):
+        return landing.rstrip("/") + ".pdf"
+    return ""
+
+
 def unpaywall_pdf(doi: str) -> tuple:
     """Return (pdf_url, landing_url) reported as open access, or ('','')."""
     url = (f"https://api.unpaywall.org/v2/{urllib.parse.quote(doi, safe='')}"
@@ -151,6 +171,14 @@ def unpaywall_pdf(doi: str) -> tuple:
         pdf = loc.get("url_for_pdf") or ""
         if pdf and str(loc.get("version", "")).lower() in ("publishedversion", "vor"):
             return pdf, loc.get("url_for_landing_page") or ""
+    # OA but Unpaywall returned only a landing page (no direct pdf). Synthesize one.
+    if d.get("is_oa"):
+        landing = (best.get("url_for_landing_page")
+                   or (d.get("oa_locations") or [{}])[0].get("url_for_landing_page")
+                   or "")
+        synth = _derive_oa_pdf_url(doi, landing)
+        if synth:
+            return synth, landing
     return "", ""
 
 

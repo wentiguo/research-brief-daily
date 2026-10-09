@@ -1218,7 +1218,13 @@ def reuse_synced_attachments(
     card_path = out_dir / f"{run_date.isoformat()}_题录与获取指引.txt"
     if not pairs and not card_path.exists():
         return [], [], note
-    offer(manifest_path)
+    # The manifest is deliberately NOT offered as an attachment any more. It is the
+    # bridge's own bookkeeping - which route answered, what hash was verified - so in
+    # the reader's mailbox it is a file that names itself "manifest.json" and tells
+    # them nothing at all. It was worse than noise: offering it made this function
+    # return a non-empty paper list on a day whose real PDFs had not yet arrived, so
+    # `_wait_and_reuse` saw its success condition met, stopped polling for the local
+    # bridge, and mailed the brief immediately with no full text behind it.
     # The citation card is not in the manifest - the fetch that will run in the cloud
     # writes its own - but a cloud run that fetched nothing still owes the reader the
     # list of articles and the legal routes they came from.

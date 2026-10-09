@@ -31,7 +31,22 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
-from zoneinfo import ZoneInfo
+
+
+def _beijing_date(days_offset: int = 0) -> str:
+    """Beijing (UTC+8) calendar date, computed without zoneinfo (Windows lacks tzdata)."""
+    return (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=8, days=days_offset)).date().isoformat()
+
+
+def _should_act_on_wishlist(date_str: str) -> bool:
+    """Only fetch when the cloud's wishlist is dated today or yesterday (Beijing).
+
+    A wishlist from two or more days ago means the cloud run has not published today's
+    yet (or the local clock is badly off); acting on a stale one would re-fetch papers
+    that already shipped. Yesterday is allowed so a small local-clock drift does not
+    skip a run that is still valid.
+    """
+    return date_str in (_beijing_date(0), _beijing_date(-1))
 
 # The script lives in .tools/ next to fetch_pdfs_local.py, so import it directly.
 _TOOLS = Path(__file__).resolve().parent
@@ -50,7 +65,7 @@ CONTENTS_LIMIT_MB = 90.0
 
 
 def local_date_str() -> str:
-    return dt.datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    return _beijing_date(0)
 
 
 def resolve_target_date(wish_doc: Any) -> str:
@@ -171,8 +186,29 @@ def main() -> int:
         print("wishlist is empty - no poster to fetch.")
         return 0
 
+    if not _should_act_on_wishlist(date_str):
+        today, yesterday = _beijing_date(0), _beijing_date(-1)
+        print(f"wishlist run_date {date_str} is neither today ({today}) nor yesterday "
+              f"({yesterday}); the cloud run has not published today's poster wishlist "
+              f"yet. Nothing to do (retrying on the next scheduled run).")
+        return 0
+
     out_dir = LOCAL_ROOT / "research_briefs" / "attachments" / date_str
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Idempotency: if every poster PDF for this date was already fetched and verified,
+    # do not re-download or re-push on the next scheduled run.
+    manifest_path = out_dir / "manifest.json"
+    if manifest_path.exists():
+        try:
+            old = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if old.get("date") == date_str and not any(
+                    not (out_dir / f["name"]).exists() for f in old.get("files", [])):
+                print(f"already synced {len(old.get('files', []))} poster PDF(s) for "
+                      f"{date_str}; nothing to do")
+                return 0
+        except Exception:
+            pass
 
     files: list[dict] = []
     for idx, entry in enumerate(papers[:2]):

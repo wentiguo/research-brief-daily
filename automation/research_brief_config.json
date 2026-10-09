@@ -1,0 +1,466 @@
+{
+  "recipient_email": "you@example.com",
+  "contact_email": "you@example.com",
+  "timezone": "Asia/Shanghai",
+  "send_time_local": "08:00",
+  "language": "zh-CN",
+  "max_papers": 20,
+  "save_history": true,
+  "generate_bibtex": true,
+  "email_subject_prefix": "每日科研简报",
+  "weekly_email_subject_prefix": "科研文献推送周报",
+  "weekly_excel_enabled": true,
+  "local_reference_archive_dir": "",
+  "evaluation_model": {
+    "note": "海报/推荐排序采用五个可审计维度（均为 0-10 分，按 weights 加权）：①文章符合度（最高权重）——与理论计算/凝聚态方向的契合程度，含 ML×理论计算偏好；②理论计算深度——是否给出可复现的理论模型、方法、参数与解析/数值结果；③期刊水平——按中科院分区表（2025-03 升级版）分级；④创新性/突破性；⑤方法严谨与可复现性（是否多方法交叉验证、给出可检验预言、公开数据/代码）。期刊水平与创新性权重严格相等且低于文章符合度。",
+    "weights": {
+      "relevance": 36,
+      "theory": 20,
+      "journal": 18,
+      "innovation": 18,
+      "rigor": 8
+    },
+    "dimension_help": {
+      "relevance": "文章符合度：题名/摘要命中用户方向关键词的深度（第一性原理、紧束缚、k·p、对称性分析、拓扑、相变、ML×理论计算等）",
+      "theory": "理论计算深度：方法是否具体可复现（模型哈密顿量/参数/计算流程），而非只有实验现象描述",
+      "journal": "期刊水平：中科院《期刊分区表》2025-03 升级版分区（1 区 10 分 / 2 区 7.2 分 / 预印本 6 分）",
+      "innovation": "创新性/突破性：有无新机制、新判据、新相/新效应；由 LLM 依据公开摘要打分，无 key 时为保守关键词代理",
+      "rigor": "方法严谨与可复现性：多方法交叉验证、可检验预言、参数扫描完备性、公开数据或代码"
+    },
+    "theory_terms": [
+      "first-principles",
+      "density functional theory",
+      "dft",
+      "tight-binding",
+      "green's function",
+      "greens function",
+      "group theory",
+      "effective Hamiltonian",
+      "k·p",
+      "k.p perturbation",
+      "berry curvature",
+      "topological invariant",
+      "chern number",
+      "wilson loop",
+      "landau theory",
+      "scaling law",
+      "analytic solution",
+      "exact solution",
+      "phase diagram",
+      "monte carlo",
+      "quantum monte carlo",
+      "self-consistent",
+      "tight binding",
+      "multiband",
+      "symmetry analysis",
+      "group representation",
+      "perturbation theory",
+      "machine learning potential",
+      "neural network potential",
+      "active learning",
+      "surrogate model"
+    ],
+    "rigor_terms": [
+      "cross-validate",
+      "cross validation",
+      "consistent with",
+      "in agreement with",
+      "independent verification",
+      "validation",
+      "reproducib",
+      "benchmark",
+      "we confirm",
+      "predicts that",
+      "testable",
+      "falsifiab",
+      "open data",
+      "code available",
+      "supplementary material",
+      "systematic scan",
+      "parameter sweep",
+      "ab initio molecular dynamics",
+      "machine learning model accuracy"
+    ]
+  },
+  "papers_per_direction": 5,
+  "extra_papers_per_direction": 3,
+  "excellent_score_threshold": 9.0,
+  "published_max_age_days": 1,
+  "digest_images": {
+    "enabled": true,
+    "poster_papers": 2,
+    "poster_priority_journals": [
+      "Nature",
+      "Science",
+      "Nature Physics",
+      "Science Advances",
+      "Physical Review Letters",
+      "Physical Review X",
+      "Nature Communications"
+    ],
+    "poster_high_relevance_threshold": 8.0,
+    "dir": "research_briefs/images",
+    "note": "poster_papers 控制海报推介 1-2 篇；海报只做中文专业精读（研究背景 / 创新亮点 / 解决的关键问题 / 可借鉴之处 / 可延展方向 + DOI），不再展示具体评分。所有文字必须能追溯到出版商公开摘要原文，LLM 生成后逐句做溯源校验，校验不通过的条目直接丢弃。"
+  },
+  "paper_attachments": {
+    "enabled": true,
+    "note": "遍历关注期刊范围内的入选文献，逐篇尝试合法获取全文与补充材料，随邮件附件发送。合法通道优先级：Unpaywall 开放获取 → arXiv/作者公开预印本 → OpenAlex/Semantic Scholar/DOAJ 开放副本 → 出版商落地页全文 → 出版商公开补充材料；本机还可走真实浏览器（需人工过 Cloudflare）。订阅期刊无合法开放副本时发送题录卡，如实说明未下载订阅全文。",
+    "dir": "research_briefs/attachments",
+    "max_file_mb": 15,
+    "max_files_per_paper": 4,
+    "max_papers": 8,
+    "browser_max_papers": 3,
+    "browser_wait_seconds": 60,
+    "local_pdf_wait_seconds": 3600
+  },
+  "theory_preference": {
+    "note": "2026-10-06 修订：用户明确的研究范围（交错磁/拓扑材料/多铁/储能电池 + 第一性原理/高通量/ML）未包含排除实验工作；为避免把在域的实验论文（如 ARPES 实测 Weyl 半金属）误伤或压到 0 分以下被整篇剔除，关闭 experiment_penalty。理论偏好仍通过 ml_theory_preference 的加分项体现（ML乘理论权重最高）。",
+    "enabled": false,
+    "experiment_penalty": -4.0
+  },
+  "ml_theory_preference": {
+    "note": "机器学习方向优先推送偏理论/计算的论文：同时命中 ml_terms 与 theory_terms（例如用机器学习做第一性原理/紧束缚建模、ML 势函数、反演设计）权重最高；只命中 theory_terms 次之；只命中 ml_terms（偏应用、偏数据）权重最低。仅影响排序打分，不会凭空提升任何论文的客观属性。",
+    "enabled": true,
+    "ml_terms": [
+      "machine learning",
+      "deep learning",
+      "neural network",
+      "graph neural network",
+      "surrogate model",
+      "active learning",
+      "materials informatics",
+      "transfer learning",
+      "diffusion model",
+      "generative model",
+      "data-driven"
+    ],
+    "theory_terms": [
+      "first-principles",
+      "density functional theory",
+      "dft",
+      "tight-binding",
+      "green's function",
+      "greens function",
+      "group theory",
+      "effective Hamiltonian",
+      "effective hamiltonian",
+      "k·p",
+      "monte carlo",
+      "analytic",
+      "machine learning potential",
+      "neural network potential",
+      "machine-learning potential",
+      "band structure",
+      "berry curvature",
+      "landau theory",
+      "continuum model",
+      "tight-binding model",
+      "hamiltonian",
+      "phase diagram",
+      "symmetry analysis",
+      "contravariant",
+      "scaling law",
+      "predictive model"
+    ],
+    "and_bonus": 4.0,
+    "theory_only_bonus": 1.5,
+    "ml_only_bonus": 0.4,
+    "ml_penalty_no_abstract": 1.0
+  },
+  "publisher_feeds": {
+    "enabled": true,
+    "timeout_seconds": 35,
+    "retries": 3,
+    "backoff_seconds": 2.0,
+    "feed_delay_seconds": 1.5,
+    "cache_ttl_seconds": 21600,
+    "complete_abstracts": true,
+    "supersedes_journal_queries": true,
+    "aps": {
+      "enabled": true,
+      "base": "https://feeds.aps.org/rss/recent/",
+      "journals": {
+        "prl": "Physical Review Letters",
+        "prb": "Physical Review B",
+        "prmaterials": "Physical Review Materials",
+        "prapplied": "Physical Review Applied",
+        "prx": "Physical Review X",
+        "prresearch": "Physical Review Research",
+        "prxquantum": "PRX Quantum",
+        "prxenergy": "PRX Energy",
+        "rmp": "Reviews of Modern Physics",
+        "prd": "Physical Review D"
+      },
+      "open_access_slugs": [
+        "prx",
+        "prresearch",
+        "prxquantum",
+        "prxenergy",
+        "prper"
+      ]
+    },
+    "nature": {
+      "enabled": true,
+      "feeds": {
+        "https://www.nature.com/nature.rss": "Nature",
+        "https://www.nature.com/nphys.rss": "Nature Physics",
+        "https://www.nature.com/nmat.rss": "Nature Materials",
+        "https://www.nature.com/nnano.rss": "Nature Nanotechnology",
+        "https://www.nature.com/ncomms.rss": "Nature Communications",
+        "https://www.nature.com/natmachintell.rss": "Nature Machine Intelligence",
+        "https://www.nature.com/natrevphys.rss": "Nature Reviews Physics",
+        "https://www.nature.com/npjqi.rss": "npj Quantum Materials"
+      },
+      "open_access_venues": [
+        "Nature Communications",
+        "npj Quantum Materials"
+      ]
+    },
+    "crossref_journals": {
+      "enabled": true,
+      "rows": 60,
+      "journals": [
+        {
+          "name": "Nano Letters",
+          "issn": "1530-6984"
+        },
+        {
+          "name": "ACS Nano",
+          "issn": "1936-0851"
+        },
+        {
+          "name": "Advanced Materials",
+          "issn": "0935-9648"
+        },
+        {
+          "name": "Advanced Functional Materials",
+          "issn": "1616-301X"
+        },
+        {
+          "name": "Small",
+          "issn": "1613-6810"
+        },
+        {
+          "name": "Acta Materialia",
+          "issn": "1359-6454"
+        },
+        {
+          "name": "npj Quantum Materials",
+          "issn": "2397-4648"
+        },
+        {
+          "name": "npj Computational Materials",
+          "issn": "2057-3960"
+        },
+        {
+          "name": "Applied Physics Letters",
+          "issn": "0003-6951"
+        },
+        {
+          "name": "Nature Computational Science",
+          "issn": "2662-8457"
+        },
+        {
+          "name": "Nature Machine Intelligence",
+          "issn": "2522-5839"
+        },
+        {
+          "name": "Reports on Progress in Physics",
+          "issn": "0034-4885"
+        },
+        {
+          "name": "Nature Reviews Materials",
+          "issn": "2058-8437"
+        },
+        {
+          "name": "National Science Review",
+          "issn": "2053-714X"
+        },
+        {
+          "name": "PNAS",
+          "issn": "0027-8424"
+        },
+        {
+          "name": "Advanced Science",
+          "issn": "2198-3844"
+        },
+        {
+          "name": "npj Communications Physics",
+          "issn": "2399-3650"
+        },
+        {
+          "name": "Chinese Physics Letters",
+          "issn": "0256-307X"
+        }
+      ]
+    },
+    "openalex_keyword_search": {
+      "enabled": true,
+      "per_page": 10,
+      "terms": [
+        "condensed matter",
+        "topological insulator",
+        "topological crystalline insulator",
+        "topological semimetal",
+        "quantum anomalous Hall",
+        "quantum valley Hall",
+        "multiferroic",
+        "ferroelectric",
+        "ferroelastic",
+        "ferroic order",
+        "magnetoelectric",
+        "skyrmion",
+        "energy storage battery",
+        "lithium battery",
+        "high-throughput materials",
+        "machine learning materials"
+      ]
+    },
+    "science": {
+      "enabled": true,
+      "feeds": {
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science": "Science",
+        "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=sciadv": "Science Advances"
+      },
+      "open_access_venues": [
+        "Science Advances"
+      ]
+    }
+  },
+  "journals": [
+    "Physical Review Letters",
+    "Physical Review B",
+    "Physical Review X",
+    "Reviews of Modern Physics",
+    "Nature",
+    "Nature Physics",
+    "Nature Materials",
+    "Nature Communications",
+    "Science",
+    "Science Advances",
+    "Advanced Materials",
+    "Nano Letters",
+    "ACS Nano",
+    "Physical Review Materials",
+    "Physical Review Applied",
+    "Physical Review Research",
+    "PRX Quantum",
+    "PRX Energy",
+    "Physical Review D",
+    "npj Quantum Materials",
+    "Nature Nanotechnology",
+    "Nature Machine Intelligence",
+    "Reports on Progress in Physics",
+    "Nature Reviews Materials",
+    "Nature Reviews Physics",
+    "Chinese Physics Letters",
+    "Physical Review Materials",
+    "Physical Review Applied",
+    "Physical Review Research",
+    "PRX Quantum",
+    "PRX Energy",
+    "Physical Review D",
+    "npj Quantum Materials",
+    "Nature Nanotechnology",
+    "Nature Machine Intelligence",
+    "Reports on Progress in Physics",
+    "Nature Reviews Materials",
+    "Nature Reviews Physics",
+    "Chinese Physics Letters"
+  ],
+  "journal_policy": {
+    "allowlist_only": true,
+    "allow_preprints": true,
+    "tier1": [
+      "Physical Review Letters",
+      "Physical Review B",
+      "Physical Review X",
+      "Reviews of Modern Physics",
+      "Nature",
+      "Nature Physics",
+      "Nature Materials",
+      "Nature Communications",
+      "Science",
+      "Science Advances",
+      "Advanced Materials",
+      "Nano Letters",
+      "ACS Nano"
+    ],
+    "tier2": [
+      "Physical Review Materials",
+      "Physical Review Applied",
+      "Physical Review Research",
+      "PRX Quantum",
+      "PRX Energy",
+      "Physical Review D",
+      "npj Quantum Materials",
+      "Nature Nanotechnology",
+      "Nature Machine Intelligence",
+      "Reports on Progress in Physics",
+      "Nature Reviews Materials",
+      "Nature Reviews Physics",
+      "Chinese Physics Letters",
+      "Physical Review Materials",
+      "Physical Review Applied",
+      "Physical Review Research",
+      "PRX Quantum",
+      "PRX Energy",
+      "Physical Review D",
+      "npj Quantum Materials",
+      "Nature Nanotechnology",
+      "Nature Machine Intelligence",
+      "Reports on Progress in Physics",
+      "Nature Reviews Materials",
+      "Nature Reviews Physics",
+      "Chinese Physics Letters"
+    ],
+    "exclude": [
+      "Science Bulletin"
+    ],
+    "journal_zones": {},
+    "_comment": "journal_zones maps a journal name to {\"zone\": 1|2, \"category\": \"...\"} for the badge shown in the email. It is optional: a journal with a tier but no zone record renders \"N 区 · 大类未建档\" rather than an empty cell, so you only need to fill it in if you want the category shown. Fill it in with your institution's own CAS-zone audit -- the values differ per institution and per year, so this template deliberately ships none."
+  },
+  "research_profile": {
+    "summary": "Replace this with your own research interests, in one or two sentences. Example: condensed-matter and materials physics -- magnetic and topological quantum materials, multiferroics, energy-storage materials; theory and first-principles computation first.",
+    "seed_papers": [
+      "Replace with 2-5 papers that represent your taste. They anchor the ranking."
+    ],
+    "core_topics": [
+      "topological insulator",
+      "topological semimetal",
+      "magnetic material",
+      "multiferroic",
+      "superconductor"
+    ],
+    "method_keywords": [
+      "first-principles",
+      "density functional theory",
+      "tight-binding",
+      "machine learning"
+    ],
+    "objective_keywords": [
+      "anomalous hall effect",
+      "berry curvature",
+      "band topology",
+      "phase transition"
+    ],
+    "domain_keywords": [
+      "condensed matter",
+      "materials science",
+      "quantum material",
+      "magnetism"
+    ],
+    "priority_topics": [],
+    "recommendation_groups": [],
+    "query_templates": [
+      "topological insulator first-principles",
+      "multiferroic magnetoelectric coupling",
+      "magnetic materials machine learning screening"
+    ]
+  },
+  "topic_gate": {
+    "_comment": "Which papers count as on-topic. Omit any key to keep the shipped default in scripts/generate_research_brief.py. IMPORTANT: the weak_signals must NOT also appear in matter_anchors, or a weak hit finds itself as its own anchor and the gate starts passing everything.",
+    "exclude_wave_physics": true
+  },
+  "_readme": "Template config. Run `python scripts/configure_project.py` to answer the setup questions and write your own automation/research_brief_config.json -- that file is gitignored and is where your email, timezone, topics and journal tiers live. Never put passwords, API keys or tokens in either file: those belong in GitHub Secrets (see scripts/setup_github_secrets.ps1)."
+}

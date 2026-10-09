@@ -1868,7 +1868,8 @@ def _git_bytes(ref_path: str) -> bytes | None:
 
 
 def _wait_and_reuse(run_date: dt.date, config: dict[str, Any], note: str, *,
-                    papers: list[Any], poster_papers: list[dict[str, Any]]) -> tuple[list[tuple[str, Any]], str]:
+                    papers: list[Any], poster_papers: list[dict[str, Any]],
+                    wait_seconds: int | None = None) -> tuple[list[tuple[str, Any]], str]:
     """Reuse locally-fetched poster PDFs, polling for them when the cloud could not fetch.
 
     Returns (synced paper-file pairs, updated note). The cloud attempt has already run;
@@ -1876,7 +1877,10 @@ def _wait_and_reuse(run_date: dt.date, config: dict[str, Any], note: str, *,
     are almost certainly APS-blocked, so we wait (up to a bounded window) for the local
     machine to fetch and push them, refreshing the folder from origin/main and re-trying
     reuse each round. If the local machine is off or late, we give up gracefully and the
-    mail goes out brief-only rather than stalling the pipeline.
+    mail goes out brief-only rather than stalling the pipeline. `wait_seconds` overrides
+    the configured `local_pdf_wait_seconds` - used for the lighter wait when the cloud
+    already has a preprint and only wants to opportunistically pick up the real publisher
+    version of record.
     """
     import time
     from fetch_paper_attachments import reuse_synced_attachments as _reuse
@@ -1887,8 +1891,11 @@ def _wait_and_reuse(run_date: dt.date, config: dict[str, Any], note: str, *,
     if pairs:
         return pairs, note
 
+    pa = config.get("paper_attachments") or {}
+    max_wait = int(wait_seconds) if wait_seconds is not None else int(pa.get("local_pdf_wait_seconds", 1800))
+    if max_wait <= 0:
+        return [], note
     waited = 0
-    max_wait = int((config.get("paper_attachments") or {}).get("local_pdf_wait_seconds", 1800))
     interval = 300
     while waited < max_wait:
         time.sleep(interval)
@@ -1900,6 +1907,15 @@ def _wait_and_reuse(run_date: dt.date, config: dict[str, Any], note: str, *,
         print(f"attachment poll: still waiting for locally-fetched poster PDFs ({waited}s)")
     print("attachment poll: local fetch window elapsed; sending brief without poster PDFs")
     return [], note
+
+
+def _merge_synced(article_files: list[tuple[str, Any]], synced_files: list[tuple[str, Any]]) -> None:
+    """Append locally-synced poster files to the mail's attachment list, de-duplicated."""
+    existing = {p.resolve() for _, p in article_files}
+    for label, path in synced_files:
+        if path.resolve() not in existing:
+            article_files.append((label, path))
+            existing.add(path.resolve())
 
 
 def google_scholar_link(title: str) -> str:
@@ -3037,16 +3053,26 @@ def main() -> int:
     # ones, deduplicated by resolved path.
     poster_count = len(poster_papers)
     have = len(article_files)
+    # Even when the cloud already grabbed an arXiv preprint for a poster, prefer to also
+    # attach the real publisher version of record - the local bridge can fetch it from this
+    # machine (APS blocks the runner). A lighter wait keeps the mail from stalling for an
+    # hour when the bridge is simply offline.
+    arxiv_only = have > 0 and any("arxiv" in p.name.lower() for _, p in article_files)
     if have < poster_count:
         try:
             synced_files, attachment_note = _wait_and_reuse(
                 run_date, config, attachment_note,
                 papers=selected_for_history, poster_papers=poster_papers)
-            existing = {p.resolve() for _, p in article_files}
-            for label, path in synced_files:
-                if path.resolve() not in existing:
-                    article_files.append((label, path))
-                    existing.add(path.resolve())
+            _merge_synced(article_files, synced_files)
+        except Exception as exc:  # noqa: BLE001 - reuse is a convenience, not a guarantee
+            print(f"warning: synced attachment reuse failed ({exc})", file=sys.stderr)
+    elif arxiv_only:
+        try:
+            synced_files, attachment_note = _wait_and_reuse(
+                run_date, config, attachment_note,
+                papers=selected_for_history, poster_papers=poster_papers,
+                wait_seconds=1800)
+            _merge_synced(article_files, synced_files)
         except Exception as exc:  # noqa: BLE001 - reuse is a convenience, not a guarantee
             print(f"warning: synced attachment reuse failed ({exc})", file=sys.stderr)
 

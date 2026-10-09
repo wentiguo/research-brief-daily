@@ -35,6 +35,15 @@ from typing import Any
 # queries cost 3.5 minutes per paper. Once the API has failed this way the rest of the run
 # skips it instead of re-discovering the outage paper by paper.
 ARXIV_UNAVAILABLE = False
+# A single slow arXiv response used to flip ARXIV_UNAVAILABLE and retire the whole
+# channel for the rest of the run. Around 2026-10-07 the Actions runner started
+# hitting socket timeouts on export.arxiv.org, so one stalled query killed the
+# only cloud route that could deliver a published article's preprint - every
+# brief since then shipped zero PDFs. We now tolerate a few consecutive failures
+# (reset on any success) and only retire the channel once it has clearly given
+# up, so an intermittent stall no longer costs every paper its PDF.
+ARXIV_FAIL_STREAK = 0
+ARXIV_FAIL_THRESHOLD = 2
 
 UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
       "Chrome/126.0 Safari/537.36 research-brief/2.0")
@@ -119,9 +128,41 @@ def _clean_title(title: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _arxiv_query_with_retries(query: str) -> "ET.Element | None":
+    """One arXiv query, retried for 429 backoff; bumps the fail streak on any other error.
+
+    A transient timeout no longer retires the channel on the spot - only a run of
+    ARXIV_FAIL_THRESHOLD consecutive failures does. Bounds the blast radius when
+    arXiv is genuinely unreachable while still letting an intermittent stall recover.
+    """
+    global ARXIV_UNAVAILABLE, ARXIV_FAIL_STREAK
+    for attempt in range(3):
+        try:
+            url = "http://export.arxiv.org/api/query?" + urllib.parse.urlencode(
+                {"search_query": query, "max_results": 5})
+            with _open(url, timeout=30) as resp:
+                return ET.fromstring(resp.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 429 and attempt < 2:
+                time.sleep(3 * (attempt + 1))
+                continue
+            ARXIV_FAIL_STREAK += 1
+            print(f"warning: arXiv lookup failed ({query[:40]}): {exc}")
+            break
+        except (urllib.error.URLError, TimeoutError, ET.ParseError) as exc:
+            ARXIV_FAIL_STREAK += 1
+            print(f"warning: arXiv lookup failed ({query[:40]}): {exc}")
+            break
+    if ARXIV_FAIL_STREAK >= ARXIV_FAIL_THRESHOLD:
+        ARXIV_UNAVAILABLE = True
+        print(f"warning: arXiv channel retired for the rest of this run "
+              f"(>= {ARXIV_FAIL_THRESHOLD} consecutive failures)")
+    return None
+
+
 def arxiv_pdf(title: str, doi: str) -> dict[str, str]:
     """Author's public preprint on arXiv, matched by DOI or by a LaTeX-cleaned title."""
-    global ARXIV_UNAVAILABLE
+    global ARXIV_FAIL_STREAK
     result: dict[str, str] = {"url": "", "verified": ""}
     if ARXIV_UNAVAILABLE:
         result["skipped"] = "本次 arXiv 接口不可达，已整体跳过该通道"
@@ -134,29 +175,7 @@ def arxiv_pdf(title: str, doi: str) -> dict[str, str]:
         if probe and probe not in queries:
             queries.append(f'ti:"{probe}"')
     for query in queries:
-        # arXiv throttles its API with 429 and expects the caller to slow down. Backing off
-        # and asking again keeps the preprint route alive; giving up on the first 429 silently
-        # costs this paper an openly-licensed copy of its own full text.
-        root = None
-        for attempt in range(3):
-            try:
-                url = "http://export.arxiv.org/api/query?" + urllib.parse.urlencode({"search_query": query, "max_results": 5})
-                with _open(url, timeout=40) as resp:
-                    root = ET.fromstring(resp.read())
-                break
-            except urllib.error.HTTPError as exc:
-                if exc.code == 429 and attempt < 2:
-                    time.sleep(3 * (attempt + 1))
-                    continue
-                ARXIV_UNAVAILABLE = True
-                print(f"warning: arXiv lookup failed ({query[:40]}): {exc}; "
-                      "the whole arXiv channel is skipped for the rest of this run")
-                break
-            except (urllib.error.URLError, TimeoutError, ET.ParseError) as exc:
-                ARXIV_UNAVAILABLE = True
-                print(f"warning: arXiv lookup failed ({query[:40]}): {exc}; "
-                      "the whole arXiv channel is skipped for the rest of this run")
-                break
+        root = _arxiv_query_with_retries(query)
         if root is None:
             continue
         for entry in root.findall(ATOM + "entry"):
@@ -166,12 +185,15 @@ def arxiv_pdf(title: str, doi: str) -> dict[str, str]:
             entry_doi = (entry.findtext("{http://arxiv.org/schemas/atom}doi") or "").strip().lower()
             if doi and entry_doi == doi.lower():
                 result = {"url": entry_id.replace("/abs/", "/pdf/"), "verified": "arXiv DOI 精确匹配"}
+                ARXIV_FAIL_STREAK = 0
                 return result
             entry_title = re.sub(r"\s+", " ", (entry.findtext(ATOM + "title") or "")).strip().lower()
             probe = re.sub(r"[^a-z0-9]", "", (title or "").lower())[:60]
             if probe and probe in re.sub(r"[^a-z0-9]", "", entry_title):
                 pdf = entry_id.replace("/abs/", "/pdf/")
                 result = {"url": pdf, "verified": "arXiv 题名匹配"}
+                ARXIV_FAIL_STREAK = 0
+                return result
     return result
 
 

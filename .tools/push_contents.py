@@ -65,6 +65,7 @@ FILES = [
     "tests/test_manifest_carryover.py",  # manifest hand-over across runs
     "tests/test_poster_priority_and_bridge.py",  # poster priority + cloud/local date guard
     "tests/test_local_bridge_guard_20261009.py",  # local bridge only acts on today/yesterday's wishlist
+    "tests/test_nature_oa_pdf_derive_20261009.py",  # root-cause regression: Nature OA omits url_for_pdf
     "automation/research_brief_config.json",
     ".github/workflows/research-brief.yml",
     "SKILL.md",

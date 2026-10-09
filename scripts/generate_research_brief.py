@@ -2247,26 +2247,55 @@ def markdown_to_html(markdown: str) -> str:
 
 
 def bibtex_key(paper: dict[str, Any]) -> str:
-    first_author = paper.get("authors", "paper").split(",")[0].split()[-1].lower()
+    # Defensive: authors may be missing, empty, a plain string, or a list.
+    # Never let a malformed record abort bibtex generation for the whole brief.
+    authors = paper.get("authors")
+    if isinstance(authors, list):
+        authors = ", ".join(str(a) for a in authors)
+    if not authors or not isinstance(authors, str):
+        authors = "paper"
+    first_author = "paper"
+    first_seg = authors.split(",")[0].strip()
+    parts = first_seg.split()
+    if parts:
+        first_author = parts[-1].lower()
     year = re.search(r"\d{4}", paper.get("published", ""))
-    first_title_word = re.sub(r"[^A-Za-z0-9]", "", paper.get("title", "paper").split()[0]).lower()
+    title = paper.get("title") or "paper"
+    title_parts = title.split()
+    first_title_word = (
+        re.sub(r"[^A-Za-z0-9]", "", title_parts[0]).lower() if title_parts else "paper"
+    )
     return f"{first_author}{year.group(0) if year else 'nd'}{first_title_word}"
 
 
 def make_bibtex(papers: list[dict[str, Any]], max_papers: int) -> str:
     entries: list[str] = []
     for paper in papers[:max_papers]:
-        year_match = re.search(r"\d{4}", paper.get("published", ""))
-        fields = {
-            "title": paper.get("title", ""),
-            "author": paper.get("authors", "").replace(", ", " and "),
-            "journal": paper.get("venue", ""),
-            "year": year_match.group(0) if year_match else "",
-            "doi": paper.get("doi", ""),
-            "url": paper.get("url", ""),
-        }
-        body = ",\n".join(f"  {k} = {{{v}}}" for k, v in fields.items() if v)
-        entries.append(f"@article{{{bibtex_key(paper)},\n{body}\n}}")
+        try:
+            raw_authors = paper.get("authors")
+            if isinstance(raw_authors, list):
+                author_val = " and ".join(str(a) for a in raw_authors)
+            elif isinstance(raw_authors, str):
+                author_val = raw_authors.replace(", ", " and ")
+            else:
+                author_val = ""
+            year_match = re.search(r"\d{4}", paper.get("published", ""))
+            fields = {
+                "title": paper.get("title", ""),
+                "author": author_val,
+                "journal": paper.get("venue", ""),
+                "year": year_match.group(0) if year_match else "",
+                "doi": paper.get("doi", ""),
+                "url": paper.get("url", ""),
+            }
+            body = ",\n".join(f"  {k} = {{{v}}}" for k, v in fields.items() if v)
+            if body:
+                entries.append(f"@article{{{bibtex_key(paper)},\n{body}\n}}")
+        except Exception as exc:  # one malformed paper must not kill the whole email
+            print(
+                f"warning: skipped bibtex for {paper.get('title', 'unknown')!r}: {exc}",
+                file=sys.stderr,
+            )
     return "\n\n".join(entries) + ("\n" if entries else "")
 
 

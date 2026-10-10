@@ -99,7 +99,7 @@ def api(method: str, path: str, token: str, body: dict | None = None):
         "Authorization": f"Bearer {token}",
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "research-brief-actions-sync",
+        "User-Agent": "research-brief-daily-sync",
     }
     if data is not None:
         headers["Content-Type"] = "application/json"

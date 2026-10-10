@@ -1,5 +1,5 @@
 ---
-name: research-brief-actions
+name: research-brief-daily
 description: Configure, run and extend a GitHub Actions daily research-brief workflow for scholarly paper monitoring (Crossref, OpenAlex, arXiv, PubMed, publisher ToC feeds), journal-tiered ranking, a three-class topic gate, Markdown/BibTeX rendering, poster write-ups with verified quotes, original-PDF attachments via a cloud-to-local bridge, and SMTP/SendGrid delivery. Use when the user wants daily paper alerts, a literature brief, arXiv or journal monitoring, GitHub Actions secrets setup, SMTP configuration, or to customise the on-topic scope.
 ---
 

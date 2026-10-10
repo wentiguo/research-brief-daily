@@ -58,6 +58,13 @@ if str(_TOOLS) not in sys.path:
 import fetch_pdfs_local as fl  # noqa: E402
 import repo_config as rc  # noqa: E402
 
+# fetch_browser_paper lives in scripts/; the desktop-browser bridge (real publisher VOR
+# for subscription journals) is imported lazily inside the per-paper loop so this module
+# still imports cleanly when playwright or the session file is absent.
+_SCRIPTS = _TOOLS.parent / "scripts"
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
 REPO = rc.repo_slug()
 LOCAL_ROOT = rc.project_root()
 WISHLIST_LOCAL = LOCAL_ROOT / "research_briefs" / "latest_poster_wishlist.json"
@@ -432,19 +439,25 @@ def main() -> int:
         if not venue:
             venue = fl.crossref_journal(doi)
 
+        label = f"{idx + 1}_{fl.slug(title, 40)}"
+        # (path, kind, note) triples for this paper: the journal VOR, any supplements,
+        # and - only as a last resort - an arXiv preprint. `kind` is one of
+        # "fulltext" (publisher VOR / open-access), "supplement", "preprint" (arXiv).
+        collected: list[tuple[Path, str, str]] = []
+
         # 1. A file this run itself already fetched and could not push.
-        path = None
         for prior in (local_manifest or {}).get("files") or []:
             if _same_doi(str(prior.get("doi", "")), doi):
                 candidate = out_dir / str(prior.get("name", ""))
                 if candidate.exists():
-                    path, note = candidate, "already downloaded here"
+                    collected.append((candidate, str(prior.get("kind") or "fulltext"),
+                                     "already downloaded here"))
                     break
 
         # 2. The same article already downloaded on a previous day. Re-fetching it is a
         #    pointless hit on the publisher, and it is how a day whose routes are
         #    blocked still gets its full text.
-        if path is None:
+        if not collected:
             cached = find_cached_pdf(doi, title, exclude_date=date_str)
             if cached is not None:
                 destination = out_dir / cached.name
@@ -457,20 +470,50 @@ def main() -> int:
                     blob = b""
                 ok, reason = fl.verify_pdf(blob, doi, title) if blob else (False, "unreadable")
                 if ok:
-                    path, note = destination, f"reused local copy from {cached.parent.name}"
+                    collected.append((destination, "fulltext",
+                                     f"reused local copy from {cached.parent.name}"))
                 else:
                     print(f"  [{idx + 1}] cached copy rejected: {reason}")
 
-        # 3. Only then ask the publisher for it.
-        if path is None:
-            path, note = fl.try_routes(doi, title, venue, out_dir)
+        # 3. Ask the publisher for the journal VOR first, then openly-served supplements.
+        #    The arXiv preprint is only appended by `try_routes` when no publisher route
+        #    answers, and is tagged "preprint" - never presented as the journal's own PDF.
+        if not collected:
+            res = fl.fetch_vor_and_supplements(doi, title, venue, out_dir)
+            if res["main_path"]:
+                collected.append((res["main_path"], res["main_kind"] or "fulltext",
+                                 res["main_note"]))
+            for spath, snote in res["supplements"]:
+                collected.append((spath, "supplement", snote))
 
-        if path:
-            label = f"{idx + 1}_{fl.slug(title, 40)}"
-            # An arXiv preprint is not the publisher's version of record, so the manifest
-            # says which of the two landed. Otherwise the mail and its citation card read
-            # as though the journal's own PDF had arrived.
-            kind = "preprint" if str(note).lower().startswith("arxiv") else "fulltext"
+        # 4. Subscription non-APS papers (Nature / Wiley / ACS / Elsevier) return no HTTP
+        #    VOR: the real publisher PDF sits behind a login that only a live browser
+        #    session can pass. When playwright and a stored session are present, drive the
+        #    desktop browser to fetch the version of record. Absent those, this is a no-op
+        #    and the arXiv preprint (if any) from step 3 stays as the honest fallback.
+        have_vor = any(k == "fulltext" for _, k, _ in collected)
+        if not have_vor:
+            try:
+                from fetch_browser_paper import browser_fetch
+                profile = LOCAL_ROOT / ".browser_storage_state.json"
+                probe = browser_fetch(
+                    doi, out_dir, title=title, max_mb=CONTENTS_LIMIT_MB,
+                    wait_seconds=20, keep_open=0, oa_pdf_urls=[],
+                    profile=str(profile) if profile.exists() else None)
+                for name in probe.get("files") or []:
+                    p = out_dir / name
+                    if p.exists() and not any(p == x[0] for x in collected):
+                        kind = "preprint" if "arxiv" in name.lower() else "fulltext"
+                        collected.append((p, kind, "browser session"))
+                        print(f"  [{idx + 1}] browser fetched {name} [{kind}]")
+            except Exception as exc:  # noqa: BLE001 - browser is optional; arXiv fallback covers it
+                print(f"  [{idx + 1}] browser VOR attempt skipped ({type(exc).__name__})")
+
+        if not collected:
+            print(f"  [{idx + 1}] FAILED {doi}: no VOR, supplement, or preprint obtainable")
+            continue
+
+        for path, kind, note in collected:
             files.append({
                 "label": label,
                 "name": path.name,
@@ -479,9 +522,7 @@ def main() -> int:
                 "bytes": path.stat().st_size,
                 "sha256": sha256_of(path),
             })
-            print(f"  [{idx + 1}] OK {doi} -> {path.name} [{note}]")
-        else:
-            print(f"  [{idx + 1}] FAILED {doi}: {note}")
+            print(f"  [{idx + 1}] OK {doi} -> {path.name} [{kind}] {note}")
 
     if not files:
         _log(f"{date_str}: no poster PDF could be fetched; not pushing an empty folder")

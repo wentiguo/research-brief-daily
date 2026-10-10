@@ -181,7 +181,7 @@ The bridge:
 ```
 08:00  cloud run        fetch metadata -> pick 2 posters -> publish
                         research_briefs/latest_poster_wishlist.json  {run_date, papers[]}
-                        then wait (default up to 30 min)
+                        then wait (default up to 60 min)
 08:15  your machine     .tools/local_fetch_posters.py
                         read the wishlist -> download the real PDFs
                         -> verify each one -> push to the repo
@@ -200,10 +200,22 @@ the Contents API, so it is not a git checkout; `git pull`/`git push` cannot work
 The Contents API also handles PDFs up to ~90 MB per file without trouble.
 
 **Verification is mandatory, not optional.** Every downloaded file must (a) start with the
-`%PDF-` magic number, (b) clear a size floor, and (c) contain its own DOI in the bytes, or
-match the title by ≥60 % of its tokens. A wrong-paper check exists because an arXiv
-lookup once returned a 2020 paper in place of a brand-new PRL; a PDF that fails
-verification is discarded rather than mailed.
+`%PDF-` magic number, (b) clear a size floor, and (c) prove it is the article you asked
+for. A wrong-paper check exists because an arXiv lookup once returned a 2020 paper in
+place of a brand-new PRL; a PDF that fails verification is discarded rather than mailed.
+
+How (c) is proved depends on where the file came from, and getting this wrong is subtle:
+
+| Route | Identity proven by |
+|---|---|
+| publisher DOI / Unpaywall / landing page | its own DOI in the bytes, or ≥60 % of the title's tokens |
+| arXiv preprint | the **arXiv metadata** that produced the link — its title must match the paper's |
+
+Do not collapse these into one rule. arXiv PDFs encode their text in a way that the byte
+search cannot reliably read, so applying the byte test there discards the correct preprint
+and reports "not this article" about a paper it demonstrably found. That failure looked
+like a missing PDF rather than a bug, and it hid a working route for months. Conversely, a
+URL scraped off a web page has vouched for nothing, so it still owes you the bytes.
 
 **The cloud stamps the date.** `local_fetch_posters.py` decides which dated folder to write
 from `run_date` **inside the wishlist**, never from the local clock — a drifting local
@@ -325,7 +337,7 @@ scripts/setup_github_secrets.ps1        PowerShell secret setup
 .tools/_check_core_imports.py           proves the core needs no third-party packages
 .tools/local_fetch_posters.py           cloud -> local PDF bridge
 .tools/push_contents.py                 Contents-API push for a non-git checkout
-tests/                                  167 tests
+tests/                                  187 tests
 ```
 
 ---
@@ -395,7 +407,7 @@ that check instead of quietly working on one contributor's machine.
 Issues and pull requests are welcome.
 
 ```bash
-python -m unittest discover -s tests -t .   # 167 tests, must stay green
+python -m unittest discover -s tests -t .   # 187 tests, must stay green
 ```
 
 Useful things to contribute:

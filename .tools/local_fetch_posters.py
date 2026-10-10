@@ -467,11 +467,15 @@ def main() -> int:
 
         if path:
             label = f"{idx + 1}_{fl.slug(title, 40)}"
+            # An arXiv preprint is not the publisher's version of record, so the manifest
+            # says which of the two landed. Otherwise the mail and its citation card read
+            # as though the journal's own PDF had arrived.
+            kind = "preprint" if str(note).lower().startswith("arxiv") else "fulltext"
             files.append({
                 "label": label,
                 "name": path.name,
                 "doi": doi,
-                "kind": "fulltext",
+                "kind": kind,
                 "bytes": path.stat().st_size,
                 "sha256": sha256_of(path),
             })

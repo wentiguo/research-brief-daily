@@ -97,7 +97,6 @@ class MailLedgerCase(unittest.TestCase):
         self.assertEqual(entry["provider"], "SMTP")
         # The ledger stamps at_utc with the real send time, so assert it starts with
         # today's date rather than a hard-coded one (the test was originally pinned to the
-        # day it was written, which made it rot as the calendar advanced).
         #
         # Compare in UTC, not local time: mark_mail_sent records dt.datetime.now(UTC),
         # so on a machine whose local date has already rolled over (or rolls over during

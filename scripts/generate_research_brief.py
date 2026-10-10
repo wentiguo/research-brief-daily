@@ -1544,7 +1544,14 @@ def _quote_abstract(quote: str, abstract: str) -> bool:
 
 
 def _fallback_digest(paper: dict[str, Any]) -> dict[str, Any]:
-    """No-LLM degradation: quote the publisher's abstract instead of inventing text."""
+    """No-LLM degradation: a Chinese-framed digest built strictly from the public abstract.
+
+    The verbatim English abstract is never printed as-is - that was the old behaviour the
+    reader disliked ("the poster reverted to printing the English abstract"). Instead the
+    key sentences are quoted inside Chinese framing, so the poster still says something true
+    and traceable, only without the per-field LLM prose. A section the abstract cannot
+    support is left empty (None) rather than filled with a hollow placeholder.
+    """
     abstract = normalize_text(paper.get("abstract"))
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", abstract) if s.strip()] if abstract else []
     def first(pred) -> str:
@@ -1552,19 +1559,103 @@ def _fallback_digest(paper: dict[str, Any]) -> dict[str, Any]:
             if pred(sentence):
                 return sentence
         return ""
-    background = first(lambda s: True) or "公开摘要不可用。"
-    highlights = [first(lambda s: re.search(r"\b(we (propose|show|demonstrate|report|find)|we present)\b", s, re.I))] 
-    highlights = [h for h in highlights if h][:2]
+    background = first(lambda s: True) or ""
+    method = first(lambda s: re.search(r"\b(we (propose|present|develop|construct|derive|introduce|report|show|demonstrate|find|reveal|observe))\b", s, re.I))
+    problem = first(lambda s: re.search(r"\b(however|although|yet|but|nevertheless|problem|challenge|remain)\b", s, re.I)) or background
+    result = first(lambda s: re.search(r"\b(we (show|demonstrate|find|report|reveal|observe)|our (results|findings)|suggests? that)\b", s, re.I)) or method
+    outlook = first(lambda s: re.search(r"\b(future|further|these results suggest|we anticipate|open (question|direction)|prospect)\b", s, re.I))
+    quote = lambda s: f"据出版商摘要：『{s}』" if s else ""
     return {
         "title_cn": "",
-        "background": background,
-        "highlights": highlights or [abstract[:220] + ("…" if len(abstract) > 220 else "")],
-        "problem": first(lambda s: re.search(r"\b(however|although|yet|but|problem|challenge)\b", s, re.I)) or background,
-        "takeaway": first(lambda s: re.search(r"\b(we (develop|construct|derive|provide)|method|approach|model)\b", s, re.I)) or "",
-        "outlook": first(lambda s: re.search(r"\b(future|further|these results suggest|we anticipate|open)\b", s, re.I)) or "",
-        "verified": "0/0（未启用 LLM，直接摘录原文）",
-        "source": "出版商公开摘要原文摘录（未启用 LLM 精读）",
+        "background": quote(background),
+        "problem": quote(problem),
+        "highlights": [quote(result)] if result else [],
+        "takeaway": quote(method),
+        "outlook": quote(outlook),
+        "verified": "未启用 LLM（直接摘录摘要原文并包为中文框架）",
+        "source": "出版商公开摘要（未启用 LLM 精读，中文框架 + 英文原文引用）",
     }
+
+
+_GENERIC_PHRASES = (
+    "本文提出了一种", "本文提出一种", "我们提出了一种", "本文研究了", "本文展示了一种",
+    "a new method", "we propose a", "this paper proposes", "this work presents a",
+    "本文旨在", "本文通过",
+)
+
+def _is_generic(text: str) -> bool:
+    """True for hollow, content-free bullets the anti-hallucination gate would otherwise keep.
+
+    A quote can verify against the abstract while the Chinese prose carries no information
+    of its own ("本文提出了一种新方法" is grounded if the abstract says "we propose a new
+    method" yet says nothing specific). The reader asked for real summaries, so such filler
+    is treated as a failure worth a regeneration attempt.
+    """
+    t = (text or "").strip()
+    if len(t) < 14:
+        return True
+    low = t.lower()
+    if any(p in low for p in _GENERIC_PHRASES):
+        return True
+    # No concrete technical noun at all -> almost certainly filler.
+    return not re.search(
+        r"(模型|方法|对称性|拓扑|序参量|相变|能带|自旋|铁电|铁磁|反铁磁|超导|密度泛函|紧束缚|k·p|k点|哈密顿|材料|体系|机制|耦合|散射|响应|输运|弛豫|晶格|轨道|谷|陈数|贝里|霍尔|极化|磁矩|交换)",
+        t)
+
+
+def _extract_poster_digest(parsed: dict[str, Any], abstract: str) -> tuple[dict[str, Any] | None, list[str]]:
+    """Turn parsed JSON into a digest dict, reporting which major sections were dropped.
+
+    Returns (digest, missing). `digest` is None only when even the highlights failed
+    verification (a sign the whole answer is ungrounded -> caller falls back). `missing`
+    lists the major sections (background/problem/takeaway/outlook) that came back empty -
+    the signal that drives a single retry with targeted feedback.
+    """
+    def cell(key: str) -> str | None:
+        item = parsed.get(key) or {}
+        text = normalize_text(item.get("text", "")) if isinstance(item, dict) else normalize_text(item)
+        quote = (item.get("quote", "") if isinstance(item, dict) else "") or ""
+        if not text:
+            return None
+        if not _quote_abstract(quote, abstract):
+            return None
+        return _clip_text(text, 130)
+
+    highlights: list[str] = []
+    total = 0
+    verified = 0
+    for item in parsed.get("highlights") or []:
+        if not isinstance(item, dict):
+            continue
+        text = normalize_text(item.get("text", ""))
+        if not text:
+            continue
+        total += 1
+        if _quote_abstract(item.get("quote", ""), abstract):
+            verified += 1
+            text = _clip_text(text, 130)
+            if text not in highlights:
+                highlights.append(text)
+
+    missing: list[str] = []
+    for key in ("background", "problem", "takeaway", "outlook"):
+        if cell(key) is None:
+            missing.append(key)
+
+    if verified == 0 and total > 0:
+        return None, ["highlights"] + missing
+
+    digest = {
+        "title_cn": _clip_text(parsed.get("title_cn", "") or "", 90),
+        "background": cell("background"),
+        "problem": cell("problem"),
+        "takeaway": cell("takeaway"),
+        "outlook": cell("outlook"),
+        "highlights": highlights,
+        "verified": f"{verified}/{total + 3} 条已逐字溯源到公开摘要",
+        "source": "出版商公开摘要（LLM 精读 + 逐条英文原文溯源校验）",
+    }
+    return digest, missing
 
 
 def assess_poster_digests(papers: list[dict[str, Any]], config: dict[str, Any]) -> None:
@@ -1607,81 +1698,61 @@ def assess_poster_digests(papers: list[dict[str, Any]], config: dict[str, Any]) 
 3. 摘要支撑不住的字段，直接省略该字段（text 留空、不进入输出），绝不写“摘要未提供”“摘要未披露”之类的占位语，也绝不编造；每条保留的字段都必须带逐字 quote。
 4. 中文用词标准专业（第一性原理/密度泛函理论、紧束缚模型、对称性分析、拓扑非平凡、序参量、相变标度律等），不要营销化、不要夸张、不要抒情。
 5. 每个 text 控制在 60-110 个汉字，简洁。
+6. background / problem / takeaway / outlook 四个字段内容必须彼此不同，不得重复同一句话；高亮要点必须点出与已有工作相比具体新在哪里（材料 / 体系 / 方法 / 对称性 / 机制），严禁出现“本文提出了一种新方法”这类无信息空话。
 
 输出严格 JSON，不要代码块、不要解释：
 {{"title_cn":"中文题名","background":{{"text":"","quote":""}},"problem":{{"text":"","quote":""}},"highlights":[{{"text":"","quote":""}},{{"text":"","quote":""}}],"takeaway":{{"text":"","quote":""}},"outlook":{{"text":"","quote":""}}}}
 
 {payload}"""
-        try:
-            from deepseek_client import chat_text  # local import: keeps this module standalone-safe
-            answer = chat_text(system, user, max_tokens=1600, temperature=0.2)
-        except Exception as exc:  # noqa: BLE001 - a digest failure must not kill the run
-            print(f"warning: poster digest failed for {paper.get('doi', '?')}: {exc}")
-            paper["digest"] = _fallback_digest(paper)
-            continue
-        if not answer:
-            paper["digest"] = _fallback_digest(paper)
-            continue
-        match = re.search(r"\{.*\}|\[.*\]", answer, re.S)
-        parsed = None
-        if match:
+        # One retry with targeted feedback: when a major section is dropped or a bullet is
+        # hollow filler, regenerate once before degrading to the abstract. The feedback tells
+        # the model exactly which fields lacked a verifiable quote, so it can fix them.
+        feedback = ""
+        digest: dict[str, Any] | None = None
+        for attempt in range(1, 3):
+            prompt_user = user + feedback
             try:
-                parsed = json.loads(match.group(0))
-            except json.JSONDecodeError:
-                parsed = None
-        if not parsed:
-            print(f"warning: poster digest JSON unparsable for {paper.get('doi', '?')}, falling back to abstract quotes")
+                from deepseek_client import chat_text  # local import: keeps this module standalone-safe
+                answer = chat_text(system, prompt_user, max_tokens=1600, temperature=0.2)
+            except Exception as exc:  # noqa: BLE001 - a digest failure must not kill the run
+                print(f"warning: poster digest failed for {paper.get('doi', '?')}: {exc}")
+                break
+            if not answer:
+                break
+            match = re.search(r"\{.*\}|\[.*\]", answer, re.S)
+            parsed = None
+            if match:
+                try:
+                    parsed = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    parsed = None
+            if not parsed:
+                print(f"warning: poster digest JSON unparsable for {paper.get('doi', '?')}, falling back")
+                break
+            digest, missing = _extract_poster_digest(parsed, abstract)
+            if digest is None:
+                break  # every bullet unverifiable -> fall back to the abstract
+            # Retry once when the abstract is long enough that the model should have found
+            # evidence, yet a major section is empty or a kept bullet is hollow filler.
+            weak = [k for k in ("background", "problem", "takeaway", "outlook")
+                    if digest.get(k) and _is_generic(digest[k])]
+            if feedback == "" and attempt == 1 and len(abstract) >= 240 and (missing or weak):
+                dropped = "、".join(missing) if missing else "无"
+                hollow = "、".join(weak) if weak else "无"
+                feedback = (
+                    f"\n\n（上次结果未通过校验，请修正：以下字段为空或引用未在摘要中逐字出现：{dropped}；"
+                    f"以下字段内容空洞泛泛：{hollow}。请严格只使用摘要原文里的句子作为 quote，"
+                    "为每个字段给出具体、非重复的要点（材料/体系/方法/对称性/机制），"
+                    "background/problem/takeaway/outlook 四者内容必须彼此不同，"
+                    "不得写“本文提出了一种新方法”这类空话。）"
+                )
+                continue
+            break
+        if digest is None:
             paper["digest"] = _fallback_digest(paper)
             continue
-
-        def cell(key: str) -> str | None:
-            item = parsed.get(key) or {}
-            text = normalize_text(item.get("text", "")) if isinstance(item, dict) else normalize_text(item)
-            quote = (item.get("quote", "") if isinstance(item, dict) else "") or ""
-            if not text:
-                return None
-            if not _quote_abstract(quote, abstract):
-                return None
-            return _clip_text(text, 130)
-
-        highlights: list[str] = []
-        total = 0
-        verified = 0
-        for item in parsed.get("highlights") or []:
-            if not isinstance(item, dict):
-                continue
-            text = normalize_text(item.get("text", ""))
-            if not text:
-                continue
-            total += 1
-            if _quote_abstract(item.get("quote", ""), abstract):
-                verified += 1
-                text = _clip_text(text, 130)
-                if text not in highlights:
-                    highlights.append(text)
-
-        # If verification rejects everything the model returned, degrade to the abstract
-        # instead of printing an unverified poster.
-        if verified == 0 and total > 0:
-            print(f"warning: poster digest quotes unverifiable for {paper.get('doi', '?')}, using abstract quotes")
-            paper["digest"] = _fallback_digest(paper)
-            continue
-
-        digest = {
-            "title_cn": _clip_text(parsed.get("title_cn", "") or paper.get("title", ""), 90),
-            "background": cell("background"),
-            "problem": cell("problem"),
-            "takeaway": cell("takeaway"),
-            "outlook": cell("outlook"),
-            "highlights": highlights,
-            "verified": f"{verified}/{total + 3} 条已逐字溯源到公开摘要",
-            "source": "出版商公开摘要（LLM 精读 + 逐条英文原文溯源校验）",
-        }
-        # A field the abstract cannot support is left *empty on purpose*: the poster
-        # renderer skips sections with no content instead of printing a placeholder
-        # sentence the reader would have to take on faith.
         paper["digest"] = digest
-        print(f"poster digest: {paper.get('doi', '?')} | traced {verified}/{total} bullets to the abstract")
+        print(f"poster digest: {paper.get('doi', '?')} | {digest.get('verified')}")
 
 
 def resolve_attachment_targets(poster_papers: list[dict[str, Any]],
@@ -1909,13 +1980,39 @@ def _wait_and_reuse(run_date: dt.date, config: dict[str, Any], note: str, *,
     return [], note
 
 
+def _slot_of(label: str) -> int | None:
+    """Article position encoded as the leading digit of an attachment label (1_<slug>)."""
+    m = re.match(r"(\d+)", str(label or ""))
+    return int(m.group(1)) - 1 if m else None
+
+
 def _merge_synced(article_files: list[tuple[str, Any]], synced_files: list[tuple[str, Any]]) -> None:
-    """Append locally-synced poster files to the mail's attachment list, de-duplicated."""
+    """Append locally-synced poster files, preferring the journal VOR over an arXiv copy.
+
+    When the local bridge delivered the publisher's version of record (a non-arXiv full
+    text) for a paper, any arXiv full text the cloud itself grabbed must not also ride
+    along: the reader asked for the journal PDF, not the preprint. So a cloud arXiv full
+    text in the same slot is dropped when a synced VOR exists for that slot. Supplements
+    and distinct papers are unaffected.
+    """
+    synced_vor_slots = set()
+    for label, path in synced_files:
+        if "arxiv" in str(path.name).lower():
+            continue
+        slot = _slot_of(label)
+        if slot is not None:
+            synced_vor_slots.add(slot)
+    preserved: list[tuple[str, Any]] = []
+    for label, path in article_files:
+        if synced_vor_slots and "arxiv" in str(path.name).lower() and _slot_of(label) in synced_vor_slots:
+            print(f"merge: dropping cloud arXiv {path.name} in favour of synced journal VOR")
+            continue
+        preserved.append((label, path))
+    article_files[:] = preserved
     existing = {p.resolve() for _, p in article_files}
     for label, path in synced_files:
         if path.resolve() not in existing:
             article_files.append((label, path))
-            existing.add(path.resolve())
 
 
 def google_scholar_link(title: str) -> str:

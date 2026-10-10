@@ -52,7 +52,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from typing import Any
 
-APP_NAME = "research-brief-actions/1.0"
+APP_NAME = "research-brief-daily/1.0"
 
 # APS journals that are fully open access even though they publish "Physical Review" titles.
 APS_OPEN_ACCESS_SLUGS = {"prx", "prresearch", "prxquantum", "prxenergy", "prper"}

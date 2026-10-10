@@ -50,10 +50,16 @@ class TestSyncedAttachmentReuse(unittest.TestCase):
         return {"paper_attachments": {"dir": str(self.tmp)}}
 
     def test_what_the_manifest_lists_is_what_travels(self) -> None:
-        """The manifest is the hand-over: its entries plus itself, and nothing else."""
+        """The manifest is the hand-over list, not something the reader is handed.
+
+        It used to be offered as an attachment too, which put a file called
+        manifest.json in the mailbox, and worse: it made this function report a paper on
+        a day whose full text had not arrived, so the caller stopped waiting for the
+        local bridge and mailed the brief immediately. Only its entries travel now.
+        """
         self._folder(self.date.isoformat())
         pairs, cards, _note = reuse_synced_attachments(self.date, self._config())
-        self.assertEqual([path.name for _label, path in pairs], ["1_paper.pdf", "manifest.json"])
+        self.assertEqual([path.name for _label, path in pairs], ["1_paper.pdf"])
         self.assertEqual([path.name for path in cards],
                          [f"{self.date.isoformat()}_题录与获取指引.txt"])
 
@@ -100,11 +106,14 @@ class TestSyncedAttachmentReuse(unittest.TestCase):
         self.assertIn("1_paper.pdf", [path.name for _label, path in pairs])
 
     def test_a_paper_named_in_the_manifest_travels(self) -> None:
-        """The day's real work still reaches the mail: named in the manifest, present on disk."""
+        """The day's real work still reaches the mail: named in the manifest, present on disk.
+
+        The manifest naming it no longer comes along - see the note above.
+        """
         out_dir = self._folder(self.date.isoformat())
         pairs, _cards, _note = reuse_synced_attachments(self.date, self._config())
         names = [path.name for _label, path in pairs]
-        self.assertIn("manifest.json", names)
+        self.assertNotIn("manifest.json", names)
         self.assertIn("1_paper.pdf", names)
         self.assertTrue(all(path.exists() for _label, path in pairs))
         self.assertTrue(out_dir.exists())
@@ -171,7 +180,11 @@ class TestSyncedAttachmentReuse(unittest.TestCase):
         (out_dir / "manifest.json").write_text(
             json.dumps({"date": self.date.isoformat(), "files": []}), encoding="utf-8")
         pairs, cards, _note = reuse_synced_attachments(self.date, self._config())
-        self.assertEqual([path.name for _label, path in pairs], ["manifest.json"])
+        # No *papers* came over, and saying otherwise is what short-circuited the wait
+        # for the local bridge. The card itself still travels.
+        self.assertEqual([path.name for _label, path in pairs], [])
+        self.assertEqual([path.name for path in cards],
+                         [f"{self.date.isoformat()}_题录与获取指引.txt"])
         self.assertEqual([path.name for _label, path in pairs if path.suffix.lower() == ".pdf"], [])
         self.assertEqual([path.name for path in cards],
                          [f"{self.date.isoformat()}_题录与获取指引.txt"])

@@ -790,7 +790,13 @@ def fetch_paper_attachments(papers: list[dict[str, Any]], run_date: dt.date, con
                     routes_text.append(f"  · [{source}] {url} → 与上一条通道同一文件，未重复下载")
                     continue
                 ok = _save(url, target, max_mb)
-                if ok and not _file_is_about(target, url, doi, paper.get("title", "")):
+                # Only the arXiv route is trusted this way, and only because arXiv chose
+                # that URL by matching this article's DOI or title. A link fished off a
+                # publisher landing page - the scan whose sources are named after the
+                # page, not after arXiv - still has to prove itself against the bytes.
+                arxiv_route = "arxiv" in source.lower()
+                if ok and not _file_is_about(target, url, doi, paper.get("title", ""),
+                                             trust_route=arxiv_route):
                     # A landing page links to anything, and the scan that collects
                     # "supplementary" links treats each of them as ours. One Nature page
                     # hands over a 14 MB DOE validation report of unrelated climate
@@ -945,7 +951,8 @@ def _distinctive_title_words(title: str) -> set[str]:
             if word not in generic}
 
 
-def _file_is_about(path: Path, url: str, doi: str, title: str = "") -> bool:
+def _file_is_about(path: Path, url: str, doi: str, title: str = "",
+                   *, trust_route: bool = False) -> bool:
     """True when the bytes served for this route really are the article we asked for.
 
     The landing-page scan collects every link on a publisher page and the page puts a
@@ -966,7 +973,26 @@ def _file_is_about(path: Path, url: str, doi: str, title: str = "") -> bool:
     A paper without a DOI cannot be checked at all; its routes were curated by name
     anyway, so it is accepted - and loudly, because a silent pass here is how a wrong
     document would get mailed.
+
+    `trust_route` is for a route whose URL was handed over by arXiv itself after it
+    answered a DOI or title query for this very article. The identity is then settled
+    before a single byte arrives, and re-checking it here misreads the situation: arXiv's
+    own PDFs keep their text encoded, so neither the DOI nor the title words are reliably
+    present as bytes. That is not "we looked and this is the wrong article", it is "this
+    check cannot read it" - and answering the second as if it were the first is what
+    discarded today's 11.6 MB preprint of the right paper. A trusted route still has to
+    be a real PDF, which is what the check falls back to.
     """
+    if trust_route:
+        try:
+            with path.open("rb") as handle:
+                magic = handle.read(8)
+        except OSError:  # noqa: BLE001 - an unreadable file simply is not accepted
+            magic = b""
+        if magic.startswith(b"%PDF-"):
+            print(f"accepted {path.name}: identity rests on the route's own metadata "
+                  f"match (the bytes carry no searchable DOI or title)")
+            return True
     if not doi:
         print(f"warning: {path.name} accepted without a DOI to check it against")
         return True

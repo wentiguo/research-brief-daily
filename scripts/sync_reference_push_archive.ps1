@@ -38,7 +38,7 @@ if ($FromGitHub) {
   if (-not (Test-Path -LiteralPath $GhPath)) {
     $GhPath = "gh"
   }
-  $tempClone = Join-Path ([System.IO.Path]::GetTempPath()) ("research-brief-actions-" + [System.Guid]::NewGuid().ToString("N"))
+  $tempClone = Join-Path ([System.IO.Path]::GetTempPath()) ("research-brief-daily-" + [System.Guid]::NewGuid().ToString("N"))
   & $GhPath repo clone $GitHubRepo $tempClone -- --depth 1 | Out-Null
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to clone $GitHubRepo with GitHub CLI."

@@ -128,7 +128,7 @@ def _send_probe(server: smtplib.SMTP | smtplib.SMTP_SSL, from_email: str, to_ema
     from email.message import EmailMessage
 
     message = EmailMessage()
-    message["Subject"] = "[research-brief-actions] SMTP probe"
+    message["Subject"] = "[research-brief-daily] SMTP probe"
     message["From"] = from_email
     message["To"] = to_email
     message.set_content("SMTP probe OK. This mailbox is now wired to the daily push.")

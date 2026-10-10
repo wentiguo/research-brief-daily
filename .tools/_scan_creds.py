@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Exhaustive credential locator for research-brief-actions.
+"""Exhaustive credential locator for this research brief project.
 
 Scans every readable text file under the skill tree (plus a couple of
 sibling locations) for SMTP / SendGrid / GitHub credential assignments.

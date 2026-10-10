@@ -29,6 +29,7 @@ returned a 2020 preprint (20347v2) for a 2026 PRL article, and the mismatch had 
 be caught or the reader would have received the wrong paper.
 """
 import argparse
+import http.client
 import json
 import os
 import re
@@ -295,11 +296,153 @@ def try_routes(doi: str, title: str, journal: str, out_dir: Path) -> tuple:
         if not ok:
             print(f"    {name}: rejected - {why}")
             continue
+        # Reaching here means the route produced a verified PDF; name it and save it.
         fname = f"{slug(journal or name)}_{slug(title, 70)}_{slug(doi.replace('/', '-'), 30)}.pdf"
         path = out_dir / fname
         path.write_bytes(blob)
         return path, f"{name} ({why}, {len(blob)//1024} KB)"
     return None, "no legal route produced a verified PDF"
+
+
+# --------------------------------------------------------------------------- #
+# Supplementary material + composite VOR fetch                                 #
+# --------------------------------------------------------------------------- #
+def _fetch_landing_page(doi: str) -> tuple[str, str]:
+    """Follow the DOI to its publisher landing page; return (final_url, html).
+
+    The landing page is where openly-served supplementary files live. A 200 HTML is
+    what we want here (not a PDF), so `_open` is fine - the publisher answers the
+    DOI redirect with the article page on a normal machine.
+    """
+    candidates = [f"https://doi.org/{doi}"]
+    if doi.startswith("10.1038/"):
+        tail = doi.split("/")[-1].replace(".", "-")
+        candidates.append(f"https://www.nature.com/articles/{tail}")
+    for url in candidates:
+        try:
+            with _open(url, timeout=30) as resp:
+                return resp.geturl(), resp.read().decode("utf-8", "replace")
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError,
+                http.client.HTTPException, OSError):
+            continue
+    return "", ""
+
+
+# A supplementary file is one whose link name carries a supplement token AND whose
+# extension is a real document type. The token list also catches "note_s1", "fig_s2",
+# "dataset", "additional" - the common shapes across APS/Nature/Springer/ACS/Elsevier.
+_SUPP_TOKEN_RE = re.compile(
+    r"(?i)(?:supplement|supp|mediaobject|mmc|esm|attachment|supporting|si_|"
+    r"supplementary|additional|figure|fig_|dataset|note_?[s]?[1-9])")
+_SUPP_EXT_RE = re.compile(
+    r"(?i)\.(?:pdf|zip|docx?|xlsx?|csv|png|jpe?g|tiff?)(?:\?|#|$)")
+# These are article navigation, not files: never offered as a supplement.
+_SUPP_STOP_RE = re.compile(r"(?i)(?:^#|/#supplemental|support\.|/help|cookie|login|account)")
+
+
+def _scan_supplement_links(html: str, landing: str, doi: str) -> list[str]:
+    """Openly-served supplementary files linked from the publisher's own landing page.
+
+    Only links on the *same publisher host* as the landing page are kept, so a
+    support/sitemap/ad URL is never offered. A supplementary file belongs to this
+    article precisely because the publisher's own page links to it - that is the
+    identity guarantee, and it is why a wrong-paper supplement cannot arrive here.
+    """
+    if not html or not landing:
+        return []
+    host = urllib.parse.urlparse(landing).netloc.lower()
+    out: list[str] = []
+    for raw in re.findall(r'href="([^"]+)"', html):
+        low = raw.lower()
+        if not _SUPP_TOKEN_RE.search(low):
+            continue
+        if not _SUPP_EXT_RE.search(low):
+            continue
+        if _SUPP_STOP_RE.search(low):
+            continue
+        url = raw
+        if url.startswith("http://"):
+            url = "https://" + url[7:]
+        elif url.startswith("//"):
+            url = "https:" + url
+        elif url.startswith("/"):
+            url = f"https://{host}{url}"
+        if urllib.parse.urlparse(url).netloc.lower() != host:
+            continue
+        if url not in out:
+            out.append(url)
+    return out
+
+
+def fetch_supplements(doi: str, title: str, out_dir: Path, *, limit: int = 4) -> list[tuple[Path, str]]:
+    """Download openly-served supplementary material for the DOI (HTTP, residential IP).
+
+    Returns (path, note) pairs. Identity for a supplement is lighter than for the full
+    text: it must be a real file (PDF/zip/...), a reasonable size, and linked from
+    the publisher's own landing page (it is, by construction). We do NOT demand the
+    article DOI inside a supplement - supplementary figures legitimately carry none -
+    but we DO require the link to come from this article's page on the publisher host,
+    which is the binding that keeps the wrong paper's files out.
+    """
+    landing, html = _fetch_landing_page(doi)
+    links = _scan_supplement_links(html, landing, doi)
+    out: list[tuple[Path, str]] = []
+    for url in links[:limit]:
+        try:
+            with _open(url, timeout=90) as r:
+                blob = r.read()
+        except urllib.error.HTTPError as e:
+            print(f"    supplement: HTTP {e.code} {url[:80]}")
+            continue
+        except (urllib.error.URLError, TimeoutError, http.client.HTTPException,
+                OSError) as exc:
+            print(f"    supplement: {type(exc).__name__} {url[:80]}")
+            continue
+        magic = blob[:4]
+        looks_file = magic in (b"%PDF", b"PK\x03\x04") or (magic[:2] == b"%P" and b"DF" in blob[:8])
+        if not looks_file:
+            print(f"    supplement: skipped (not a file) {url[:80]}")
+            continue
+        if len(blob) < 4096:
+            print(f"    supplement: skipped (too small, {len(blob)} B) {url[:80]}")
+            continue
+        tail = urllib.parse.urlparse(url).path.rsplit("/", 1)[-1] or "file"
+        fname = f"supp_{slug(title, 50)}_{slug(tail, 40)}"
+        if not fname.lower().endswith((".pdf", ".zip", ".docx", ".xlsx", ".csv",
+                                       ".png", ".jpg", ".jpeg", ".tif", ".tiff")):
+            fname += ".pdf"
+        path = out_dir / fname
+        path.write_bytes(blob)
+        note = f"supplement ({len(blob)//1024} KB) from {urllib.parse.urlparse(url).netloc}"
+        out.append((path, note))
+        print(f"    OK supplement -> {path.name} [{note}]")
+    if not out and links:
+        print(f"    supplement: {len(links)} candidate link(s) found but none downloaded "
+              f"(paywalled or not a direct file)")
+    return out
+
+
+def fetch_vor_and_supplements(doi: str, title: str, venue: str, out_dir: Path) -> dict:
+    """Best-effort journal version of record (VOR) + openly-served supplements.
+
+    The arXiv preprint is only the fallback for the *main* file when no publisher
+    route answers - it is never preferred. Supplements are fetched on their own.
+
+    Returns a dict: main_path (Path|None), main_kind ('fulltext'|'preprint'|None),
+    main_note (str), supplements (list of (path, note)).
+    """
+    main_path, main_note = try_routes(doi, title, venue, out_dir)
+    main_kind = None
+    if main_path:
+        # try_routes names the winning route first, so the note opens with it:
+        # "aps ...", "unpaywall ...", "arxiv (...)", "landing ...". Only "arxiv" is
+        # the preprint; everything else is the publisher's own file (VOR or OA).
+        main_kind = "preprint" if main_note.lower().startswith("arxiv") else "fulltext"
+    supplements = fetch_supplements(doi, title, out_dir)
+    return {
+        "main_path": main_path, "main_kind": main_kind, "main_note": main_note,
+        "supplements": supplements,
+    }
 
 
 def dois_from_brief(md: str) -> list:

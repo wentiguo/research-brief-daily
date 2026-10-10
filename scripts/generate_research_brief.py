@@ -71,7 +71,7 @@ HISTORY_PATH = ROOT / "automation" / "recommended_history.json"
 MAIL_LEDGER_PATH = ROOT / "automation" / "mail_ledger.json"
 BRIEF_DIR = ROOT / "research_briefs"
 ARCHIVE_DIR = ROOT / "reference_push_archive"
-APP_NAME = "research-brief-actions/1.0"
+APP_NAME = "research-brief-daily/1.0"
 
 # Upper bound on how long a 429 Retry-After is honored. Some APIs answer with a value
 # measured in hours; waiting that long would stall the whole run for one source.

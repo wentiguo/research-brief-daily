@@ -1221,6 +1221,59 @@ def is_allowed_venue(paper: dict[str, Any], config: dict[str, Any]) -> bool:
     return not policy.get("allowlist_only", True)
 
 
+# 2026-10-11 user rule: experimental studies are only pushed from Nature/Science.
+# Theory / computation / ML work keeps the normal journal allowlist. Both lists are
+# deliberately conservative substrings; the theory check runs FIRST so a computational
+# paper that mentions a measurement for comparison ("consistent with spectroscopy")
+# is never misclassified as experimental.
+_EXPERIMENTAL_STUDY_TERMS = (
+    "experiment", "experimentally", "we measure", "we measured", "measurement",
+    "we observe", "observed", "synthesiz", "synthesis", "grown by", "single crystal",
+    "epitax", "thin film", "sputter", "fabricat", "device", "transport measurement",
+    "arpes", "neutron scattering", "x-ray diffraction", "spectroscopy", "magnetometry",
+    "susceptibility", "resistivity", "hall measurement",
+)
+
+_THEORY_COMPUTATION_TERMS = (
+    "first-principles", "first principles", "density functional theory", "dft",
+    "ab initio", "tight-binding", "tight binding", "k·p", "hamiltonian",
+    "monte carlo", "simulation", "simulations", "we simulate", "machine learning",
+    "deep learning", "neural network", "high-throughput", "calculat", "we predict",
+    "theoretical study", "theoretical prediction", "theoretical framework",
+    "symmetry analysis", "model hamiltonian", "effective model", "landau theory",
+    "we propose", "we derive", "analytical solution", "we theoretically",
+)
+
+
+def is_experimental_study(paper: dict[str, Any]) -> bool:
+    """Heuristic: the abstract describes measurements/synthesis/growth with NO
+    theory/computation vocabulary -> an experimental study. Papers with no abstract
+    or no signal on either side are NOT counted as experimental (conservative:
+    nothing is dropped that we cannot judge)."""
+    text = paper_text(paper)
+    if not text:
+        return False
+    if any(t in text for t in _THEORY_COMPUTATION_TERMS):
+        return False
+    return any(t in text for t in _EXPERIMENTAL_STUDY_TERMS)
+
+
+def passes_experimental_venue_gate(paper: dict[str, Any], config: dict[str, Any]) -> bool:
+    """Experimental studies pass only when the venue is in the gate's allowlist
+    (default Nature/Science, exact match - "Nature Communications" does NOT count
+    as Nature). Non-experimental papers always pass."""
+    gate = config.get("experimental_venue_gate") or {}
+    if not gate.get("enabled", False):
+        return True
+    allowed = {str(v).strip().lower() for v in gate.get("allowed_venues", ["Nature", "Science"])}
+    if not allowed:
+        return True
+    venue = (paper.get("venue") or "").strip().lower()
+    if venue in allowed:
+        return True
+    return not is_experimental_study(paper)
+
+
 def ml_theory_bonus(paper: dict[str, Any], config: dict[str, Any]) -> tuple[float, list[str]]:
     """Reward machine-learning work that is also theoretical/computational.
 
@@ -3052,6 +3105,12 @@ def main() -> int:
     ranked = [p for p in ranked if is_allowed_venue(p, config)]
     if len(ranked) != before_policy:
         print(f"journal policy: dropped {before_policy - len(ranked)} papers outside the 1区/2区 allowlist")
+    # 2026-10-11 user rule: experimental studies are pushed only from Nature/Science;
+    # theory / computation / ML studies keep the normal journal allowlist.
+    before_exp = len(ranked)
+    ranked = [p for p in ranked if passes_experimental_venue_gate(p, config)]
+    if len(ranked) != before_exp:
+        print(f"experimental gate: dropped {before_exp - len(ranked)} experimental papers outside Nature/Science")
     grouped_for_history, selected_for_history = group_recommendations(ranked, config)
     if not selected_for_history:
         selected_for_history = ranked[: int(config.get("max_papers", 8))]

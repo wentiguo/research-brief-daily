@@ -1229,7 +1229,8 @@ def is_allowed_venue(paper: dict[str, Any], config: dict[str, Any]) -> bool:
 _EXPERIMENTAL_STUDY_TERMS = (
     "experiment", "experimentally", "we measure", "we measured", "measurement",
     "we observe", "observed", "synthesiz", "synthesis", "grown by", "single crystal",
-    "epitax", "thin film", "sputter", "fabricat", "device", "transport measurement",
+    "single-crystal", "epitax", "thin film", "thin-film", "sputter", "fabricat", "device",
+    "transport measurement",
     "arpes", "neutron scattering", "x-ray diffraction", "spectroscopy", "magnetometry",
     "susceptibility", "resistivity", "hall measurement",
 )
@@ -3105,6 +3106,13 @@ def main() -> int:
     ranked = [p for p in ranked if is_allowed_venue(p, config)]
     if len(ranked) != before_policy:
         print(f"journal policy: dropped {before_policy - len(ranked)} papers outside the 1区/2区 allowlist")
+    # The experimental gate must judge the COMPLETE abstract. APS feeds truncate
+    # abstracts, and a truncated experimental abstract can lose every measurement
+    # term - the conservative pass then reads "cannot judge" and lets an experimental
+    # PRL through (root cause of the 2026-10-11 terahertz-readout leak). Completing
+    # here (not after grouping) is the fix; the later call on the selected list
+    # becomes a cheap no-op for papers already completed.
+    _complete_truncated_abstracts(ranked, config, contact=contact_email(config))
     # 2026-10-11 user rule: experimental studies are pushed only from Nature/Science;
     # theory / computation / ML studies keep the normal journal allowlist.
     before_exp = len(ranked)

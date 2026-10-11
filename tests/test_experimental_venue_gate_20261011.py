@@ -112,5 +112,52 @@ class ExperimentalVenueGateTests(unittest.TestCase):
             p, {"experimental_venue_gate": {"enabled": False}}))
 
 
+class TruncationRegressionTests(unittest.TestCase):
+    """2026-10-11 leak: the terahertz-readout PRL reached the mailbox although the
+    archived (complete) abstract is plainly experimental. Root cause: the gate ran
+    BEFORE _complete_truncated_abstracts, so it judged the APS feed's truncated
+    abstract, which had lost every measurement term - and the conservative
+    "cannot judge" pass let it through."""
+
+    # The complete public abstract of 10.1103/rpfv-7nm6 (experimental vocabulary
+    # lives in the later sentences the APS feed cuts off).
+    FULL_ABSTRACT = (
+        "A single-cycle terahertz pulse applied to single-crystal holmium iron garnet "
+        "Ho3Fe5O12 strongly perturbs the magneto-optical Faraday effect. The "
+        "experimental dependencies reveal that the findings can be described as the "
+        "ultrafast terahertz-electric-field-induced magneto-optical Faraday effect "
+        "caused by the resonant excitation of crystal-field-split f-f electronic "
+        "transitions. We demonstrate that the effect is not limited to Ho3Fe5O12."
+    )
+    # What a truncation that cuts before "The experimental dependencies" looks like:
+    # no measurement term, no theory term -> the old gate read "cannot judge".
+    TRUNCATED_ABSTRACT = (
+        "A single-cycle terahertz pulse applied to single-crystal holmium iron garnet "
+        "Ho3Fe5O12 strongly perturbs the magneto-optical Faraday effect."
+    )
+
+    def test_single_crystal_hyphenated_is_experimental(self) -> None:
+        p = paper("Optical Readout of the Magnetic State Using Terahertz Electric Fields",
+                  self.FULL_ABSTRACT, "Physical Review Letters")
+        self.assertTrue(grb.is_experimental_study(p))
+
+    def test_experimental_prl_with_full_abstract_dropped(self) -> None:
+        p = paper("Optical Readout of the Magnetic State Using Terahertz Electric Fields",
+                  self.FULL_ABSTRACT, "Physical Review Letters")
+        self.assertFalse(grb.passes_experimental_venue_gate(p, CONFIG))
+
+    def test_gate_runs_after_abstract_completion(self) -> None:
+        """Ordering invariant in the main flow: abstract completion on `ranked`
+        must be called before the experimental venue gate filters `ranked`.
+        Guards the exact regression above (a source-order pin, since the
+        completion-then-gate sequence lives in main())."""
+        src = (Path(__file__).resolve().parents[1] / "scripts" / "generate_research_brief.py").read_text(encoding="utf-8")
+        completion = src.find("_complete_truncated_abstracts(ranked")
+        gate = src.find("ranked = [p for p in ranked if passes_experimental_venue_gate(p, config)]")
+        self.assertGreater(completion, 0, "abstract completion call on ranked not found")
+        self.assertGreater(gate, 0, "experimental gate call not found")
+        self.assertLess(completion, gate, "abstract completion must run BEFORE the experimental gate")
+
+
 if __name__ == "__main__":
     unittest.main()

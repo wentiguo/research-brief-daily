@@ -118,6 +118,11 @@
     "enabled": false,
     "experiment_penalty": -4.0
   },
+  "experimental_venue_gate": {
+    "note": "2026-10-11 用户规则：实验类研究只从 Nature / Science 推送（精确刊名匹配，Nature Communications 不算 Nature）；第一性原理/理论/计算/ML 研究不受此限，仍按期刊白名单规则推送。实验判定为启发式：先查理论/计算词汇（DFT、紧束缚、哈密顿量、模拟、机器学习等），命中任何一个即不算实验——避免把『模拟与谱学测量一致』类理论文误伤；无摘要或两侧均无信号的条目保守地不算实验，绝不误删无法判断的论文。arXiv 预印本中的实验工作同样不推送（venue=arXiv 不在白名单）。",
+    "enabled": true,
+    "allowed_venues": ["Nature", "Science"]
+  },
   "ml_theory_preference": {
     "note": "机器学习方向优先推送偏理论/计算的论文：同时命中 ml_terms 与 theory_terms（例如用机器学习做第一性原理/紧束缚建模、ML 势函数、反演设计）权重最高；只命中 theory_terms 次之；只命中 ml_terms（偏应用、偏数据）权重最低。仅影响排序打分，不会凭空提升任何论文的客观属性。",
     "enabled": true,

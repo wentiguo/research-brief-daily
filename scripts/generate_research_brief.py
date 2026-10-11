@@ -951,8 +951,6 @@ def paper_topic(paper: dict[str, Any], config: dict[str, Any]) -> str:
         context_terms = group.get("context_terms", [])
         if terms_match(text, terms) and (not context_terms or terms_match(text, context_terms)):
             return normalize_text(group.get("name")) or "未分类"
-    if is_priority_journal(paper.get("venue", "")):
-        return "顶刊已发表精选"
     return "未分类"
 
 
@@ -1119,10 +1117,19 @@ def is_domain_match(paper: dict[str, Any], config: dict[str, Any]) -> bool:
     """Universal topic gate. The journal allowlist is enforced separately by
     is_allowed_venue, so this only decides whether a paper is on-topic.
 
+    Wave physics (topological photonics / acoustics, polaritonics) is excluded
+    outright: it is a different line from the user's electronic topological-materials /
+    magnetism scope, yet it slips through the generic 'topological' / 'phonon' vocabulary
+    that ``topic_signal_pass`` accepts as a DIRECT/WEAK hit. A paper that names a material
+    host keeps its matter anchor and is therefore NOT wave physics, so in-scope
+    altermagnetic-phonon or Berry-curvature-in-optical-detection work still passes.
+
     A subscribed letter often carries no abstract (APS supplies none to Crossref /
     OpenAlex), so when the abstract is missing we judge on the title alone - a title is
     short enough that it does not drown in boilerplate.
     """
+    if is_wave_physics(paper):
+        return False
     text = paper_text(paper)
     if topic_signal_pass(text, config):
         return True
@@ -2107,18 +2114,6 @@ def group_recommendations(papers: list[dict[str, Any]], config: dict[str, Any]) 
     unique: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    featured = [
-        paper for paper in papers
-        if publication_priority(paper) == 0 and paper.get("abstract")
-    ][:base_limit + extra_limit]
-    if featured:
-        grouped.append(("顶刊/已发表精选", featured))
-        for paper in featured:
-            key = paper_history_id(paper)
-            if key and key not in seen:
-                seen.add(key)
-                unique.append(paper)
-
     def _take(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
         selected = [p for p in candidates if paper_history_id(p) not in seen][:base_limit]
         extras = [
@@ -2152,13 +2147,6 @@ def group_recommendations(papers: list[dict[str, Any]], config: dict[str, Any]) 
             candidates.append(paper)
         grouped.append((name, _take(candidates)))
 
-    featured = [
-        paper for paper in papers
-        if publication_priority(paper) == 0 and paper.get("abstract")
-        and paper_history_id(paper) not in seen
-    ]
-    if featured:
-        grouped.append(("顶刊/已发表精选", _take(featured)))
     return grouped, unique
 
 
@@ -2171,11 +2159,12 @@ def make_markdown(papers: list[dict[str, Any]], config: dict[str, Any], run_date
     high = sum(1 for p in selected if p.get("score", 0) >= 8)
     medium = sum(1 for p in selected if 4 <= p.get("score", 0) < 8)
     top_count, published_count, arxiv_count = publication_mix(selected)
+    published_total = top_count + published_count
     language = config.get("language", "en")
 
     if language.lower().startswith("zh"):
         title = f"# 科研简报 | {run_date.isoformat()}"
-        summary = f"今日筛出 {len(selected)} 篇候选论文：顶刊已发表 {top_count} 篇，其他已发表/开放元数据 {published_count} 篇，arXiv 预印本 {arxiv_count} 篇；高相关 {high} 篇，中等相关 {medium} 篇。"
+        summary = f"今日筛出 {len(selected)} 篇候选论文（均按研究方向归类）：已发表 {published_total} 篇，arXiv 预印本 {arxiv_count} 篇；高相关 {high} 篇，中等相关 {medium} 篇。"
         overview = "## 今日概览"
         priority = "## 分方向推荐"
         details = "## 精读清单"
@@ -2190,7 +2179,7 @@ def make_markdown(papers: list[dict[str, Any]], config: dict[str, Any], run_date
         ]
     else:
         title = f"# Research Brief | {run_date.isoformat()}"
-        summary = f"Selected {len(selected)} candidate papers: {top_count} priority-journal published, {published_count} other published/open metadata, {arxiv_count} arXiv preprints; {high} high relevance, {medium} medium relevance."
+        summary = f"Selected {len(selected)} candidate papers, grouped by research direction only: {published_total} published, {arxiv_count} arXiv preprints; {high} high relevance, {medium} medium relevance."
         overview = "## Overview"
         priority = "## Today's Priority"
         details = "## Reading List"
@@ -2212,9 +2201,9 @@ def make_markdown(papers: list[dict[str, Any]], config: dict[str, Any], run_date
         lines.append("No relevant papers were found in this run.")
     lines.append("")
     lines.append(overview)
-    lines.append(f"- Source mix: 顶刊已发表 {top_count}; 其他已发表/开放元数据 {published_count}; arXiv {arxiv_count}.")
-    lines.append("- Ranking rule: priority-journal published papers first, other published papers second, arXiv preprints after published articles.")
-    lines.append("- Abstract rule: top-journal papers are included when abstract metadata can be found, even if full text is inaccessible.")
+    lines.append(f"- Source mix: 已发表 {published_total} 篇（含顶刊，但统一按研究方向归类、不再单独成块）; arXiv {arxiv_count} 篇。")
+    lines.append("- 归类规则: 仅按研究方向分组，不再单独列出「顶刊」板块；组内按相关性排序。")
+    lines.append("- 收录规则: 已发表文章在有摘要元数据时纳入，即使全文不可访问；与方向无关的顶刊文章不再进入简报。")
     lines.append("")
 
     if grouped:
